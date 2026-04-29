@@ -44,8 +44,7 @@ export default function Terms() {
       <LegalSection id="service" number="02" title="The service">
         <p>
           AutoViral is an AI-powered content automation platform that helps creators discover trending topics, generate scripts and voiceovers,
-          render vertical videos, and schedule publishing to TikTok. The Services include the Dashboard at autoviral.app, our scheduling and
-          rendering pipeline, and any related APIs, integrations, or features we make available.
+          render vertical videos, and schedule publishing to TikTok. The Services include the AutoViral Dashboard, our scheduling and rendering pipeline, and any related APIs, integrations, or features we make available.
         </p>
         <p>
           We may update, improve, or change features at any time. Where a change materially reduces functionality you depend on, we will notify you
@@ -217,13 +216,10 @@ export default function Terms() {
       </LegalSection>
 
       <LegalSection id="contact" number="17" title="Contact us">
-        <p>For legal questions or to send formal notices, please contact:</p>
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 mt-4">
-          <p className="font-bold text-white mb-2">AutoViral Platforms Inc.</p>
-          <p className="text-white/60 mb-1">legal@autoviral.app</p>
-          <p className="text-white/60">support@autoviral.app for general inquiries</p>
-        </div>
-      </LegalSection>
+          <p>
+            For legal questions or to send formal notices, please contact AutoViral Platforms Inc. through the contact channel listed on our website.
+          </p>
+        </LegalSection>
     </LegalLayout>
   );
 }

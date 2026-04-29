@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-primary: #FF0050; /* TikTok Pinkish/Red */
+  --color-brand-secondary: #00F2EA; /* TikTok Cyan */
+  --color-bg-dark: #010101;
+  --color-surface: #121212;
+  --color-surface-lighter: #1E1E1E;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-dark text-white font-sans antialiased;
+  }
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tiktok-gradient {
+  background: linear-gradient(45deg, var(--color-brand-primary) 0%, var(--color-brand-secondary) 100%);
+}
+

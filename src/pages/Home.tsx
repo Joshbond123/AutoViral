@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchTikTokAuthUrl } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Zap, Shield, Rocket, TrendingUp, ChevronRight, Play, CheckCircle, 
@@ -19,8 +20,7 @@ export default function Home() {
 
   const handleLogin = async () => {
     try {
-      const response = await fetch('/api/auth/tiktok/url');
-      const { url } = await response.json();
+      const url = await fetchTikTokAuthUrl();
       const width = 500;
       const height = 600;
       const left = window.screen.width / 2 - width / 2;
@@ -28,6 +28,7 @@ export default function Home() {
       window.open(url, 'TikTok Login', `width=${width},height=${height},top=${top},left=${left}`);
     } catch (err) {
       console.error(err);
+      alert('TikTok login is unavailable. The Supabase Edge Functions may not be deployed yet.');
     }
   };
 

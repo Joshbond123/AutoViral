@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchTikTokAuthUrl } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -347,7 +348,15 @@ export default function Home() {
             </div>
             
             <FooterColumn title="Product" links={['TopicShield', 'AI Scripting', 'API Rotation', 'Scheduled Rendering']} />
-            <FooterColumn title="Company" links={['Our Vision', 'Terms of Use', 'Privacy Policy', 'Brand Kit']} />
+            <div>
+              <h5 className="font-bold text-[10px] uppercase tracking-widest text-white/20 mb-8">Company</h5>
+              <ul className="space-y-4 text-sm text-white/40">
+                <li className="hover:text-brand-secondary transition-colors cursor-pointer">Our Vision</li>
+                <li><Link to="/terms" className="hover:text-brand-secondary transition-colors">Terms of Service</Link></li>
+                <li><Link to="/privacy" className="hover:text-brand-secondary transition-colors">Privacy Policy</Link></li>
+                <li className="hover:text-brand-secondary transition-colors cursor-pointer">Brand Kit</li>
+              </ul>
+            </div>
             <FooterColumn title="Resources" links={['Help Center', 'API Docs', 'Status', 'Creator Guide']} />
           </div>
 

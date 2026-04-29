@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calendar, Clock, Zap, Shield, Wand2, CheckCircle, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { postSchedule } from '../lib/api';
 
 const NICHES = [
   "Daily Crypto Scam 🔥",
@@ -31,20 +32,13 @@ export default function Schedule() {
       const userId = localStorage.getItem('tiktok_user_id');
       const scheduledTime = new Date(`${date}T${time}`).toISOString();
       
-      const response = await fetch('/api/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          scheduledTime,
-          niche: isAutoNiche ? 'AUTO' : selectedNiche
-        })
+      await postSchedule({
+        userId: userId || '',
+        scheduledTime,
+        niche: isAutoNiche ? 'AUTO' : selectedNiche,
       });
-
-      if (response.ok) {
-        setShowSuccess(true);
-        setTimeout(() => navigate('/dashboard'), 2000);
-      }
+      setShowSuccess(true);
+      setTimeout(() => navigate('/dashboard'), 2000);
     } catch (err) {
       console.error(err);
     } finally {

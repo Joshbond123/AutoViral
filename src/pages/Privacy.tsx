@@ -28,8 +28,7 @@ export default function Privacy() {
     >
       <LegalSection id="overview" number="01" title="Overview">
         <p>
-          AutoViral Platforms Inc. (“AutoViral”, “we”, “our”, or “us”) operates the AutoViral platform at <strong className="text-white">autoviral.app</strong> and the
-          related AI content automation services (the “Services”). This Privacy Policy describes how we collect, use, disclose, and protect your
+          AutoViral Platforms Inc. (“AutoViral”, “we”, “our”, or “us”) operates the AutoViral platform and the related AI content automation services (the “Services”). This Privacy Policy describes how we collect, use, disclose, and protect your
           information when you use the Services.
         </p>
         <p>
@@ -189,13 +188,9 @@ export default function Privacy() {
           <>Lodge a complaint with your local data protection authority.</>,
         ]} />
         <p>
-          To exercise any of these rights, email{' '}
-          <a href="mailto:privacy@autoviral.app" className="text-brand-secondary hover:text-white transition-colors font-semibold">
-            privacy@autoviral.app
-          </a>
-          . We respond within 30 days.
-        </p>
-      </LegalSection>
+            To exercise any of these rights, please get in touch through the contact channel listed on our website. We respond within 30 days.
+          </p>
+        </LegalSection>
 
       <LegalSection id="children" number="11" title="Children's privacy">
         <p>
@@ -220,16 +215,10 @@ export default function Privacy() {
       </LegalSection>
 
       <LegalSection id="contact" number="14" title="Contact us">
-        <p>
-          For privacy questions, requests, or complaints, please reach our Data Protection Officer:
-        </p>
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 mt-4">
-          <p className="font-bold text-white mb-2">AutoViral Platforms Inc.</p>
-          <p className="text-white/60 mb-1">Attn: Data Protection Officer</p>
-          <p className="text-white/60 mb-1">privacy@autoviral.app</p>
-          <p className="text-white/60">support@autoviral.app for general questions</p>
-        </div>
-      </LegalSection>
+          <p>
+            For privacy questions, requests, or complaints, please reach the Data Protection Officer of AutoViral Platforms Inc. through the contact channel listed on our website.
+          </p>
+        </LegalSection>
     </LegalLayout>
   );
 }

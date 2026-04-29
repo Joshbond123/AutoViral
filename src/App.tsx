@@ -68,7 +68,7 @@ function AppContent() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/AutoViral">
       <AppContent />
     </BrowserRouter>
   );

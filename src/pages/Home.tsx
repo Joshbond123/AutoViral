@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { fetchTikTokAuthUrl } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Zap, Shield, Rocket, TrendingUp, ChevronRight, Play, CheckCircle, 
+  Shield, Rocket, TrendingUp, ChevronRight, Play, CheckCircle, 
   Globe, Cpu, Sparkles, ArrowRight, BarChart3, Repeat, Menu, X,
   Lock, Calendar, Smartphone, Wand2, Layers, MessageSquare,
   Star, HelpCircle
@@ -47,9 +47,7 @@ export default function Home() {
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'py-4 bg-[#050505]/80 backdrop-blur-xl border-b border-white/5' : 'py-8'}`}>
         <div className="container mx-auto px-6 flex justify-between items-center">
           <div className="flex items-center gap-3 group cursor-pointer">
-            <div className="w-10 h-10 tiktok-gradient rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20 group-hover:rotate-6 transition-transform">
-              <Zap size={20} fill="white" />
-            </div>
+            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20 group-hover:rotate-6 transition-transform" />
             <span className="font-bold text-2xl tracking-tighter uppercase">AutoViral</span>
           </div>
 
@@ -330,9 +328,7 @@ export default function Home() {
           <div className="grid md:grid-cols-6 gap-12 mb-20">
             <div className="md:col-span-2">
               <div className="flex items-center gap-3 mb-8">
-                <div className="w-10 h-10 tiktok-gradient rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20">
-                  <Zap size={20} fill="white" />
-                </div>
+                <img src={`${import.meta.env.BASE_URL}logo.png`} alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20" />
                 <span className="font-bold text-2xl tracking-tighter uppercase">AutoViral</span>
               </div>
               <p className="text-white/30 text-sm max-w-xs leading-relaxed mb-6">

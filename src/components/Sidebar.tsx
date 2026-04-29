@@ -1,4 +1,4 @@
-import { LayoutDashboard, Calendar, History, Settings, LogOut, Play, Shield, Zap } from 'lucide-react';
+import { LayoutDashboard, Calendar, History, Settings, LogOut, Play, Shield } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 
@@ -20,9 +20,7 @@ export default function Sidebar() {
   return (
     <div className="w-64 h-screen bg-surface border-r border-white/5 flex flex-col p-6 fixed left-0 top-0">
       <div className="flex items-center gap-3 mb-12 px-2">
-        <div className="w-10 h-10 tiktok-gradient rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20">
-          <Zap className="text-white fill-white" size={20} />
-        </div>
+        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20" />
         <div>
           <h1 className="font-bold text-lg tracking-tight">AutoViral</h1>
           <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-mono">TikTok Automation</p>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Zap, Menu, X, ArrowRight, Smartphone } from 'lucide-react';
+import { Menu, X, ArrowRight, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { fetchTikTokAuthUrl } from '../lib/api';
 
@@ -73,9 +73,7 @@ export default function LegalLayout({ eyebrow, title, subtitle, lastUpdated, sec
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'py-4 bg-[#050505]/80 backdrop-blur-xl border-b border-white/5' : 'py-6 md:py-8'}`}>
         <div className="container mx-auto px-6 flex justify-between items-center">
           <Link to="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 tiktok-gradient rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20 group-hover:rotate-6 transition-transform">
-              <Zap size={20} fill="white" />
-            </div>
+            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20 group-hover:rotate-6 transition-transform" />
             <span className="font-bold text-2xl tracking-tighter uppercase">AutoViral</span>
           </Link>
 
@@ -213,9 +211,7 @@ export default function LegalLayout({ eyebrow, title, subtitle, lastUpdated, sec
           <div className="grid grid-cols-2 md:grid-cols-4 gap-12 mb-16">
             <div className="col-span-2">
               <Link to="/" className="flex items-center gap-3 mb-6 group w-fit">
-                <div className="w-10 h-10 tiktok-gradient rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20">
-                  <Zap size={20} fill="white" />
-                </div>
+                <img src={`${import.meta.env.BASE_URL}logo.png`} alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20" />
                 <span className="font-bold text-2xl tracking-tighter uppercase">AutoViral</span>
               </Link>
               <p className="text-sm text-white/40 max-w-xs leading-relaxed mb-8">

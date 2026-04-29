@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Post } from '../types';
+import { fetchHistory } from '../lib/api';
 
 export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -12,9 +13,8 @@ export default function Dashboard() {
       const userId = localStorage.getItem('tiktok_user_id');
       if (!userId) return;
       try {
-        const res = await fetch(`/api/history/${userId}`);
-        const data = await res.json();
-        setPosts(data);
+        const data = await fetchHistory(userId);
+        setPosts(Array.isArray(data) ? data as Post[] : []);
       } catch (err) {
         console.error(err);
       } finally {

@@ -1,0 +1,13 @@
+project_id = "aprwenafjyruidxmafkx"
+
+[functions.tiktok-auth-url]
+verify_jwt = false
+
+[functions.tiktok-callback]
+verify_jwt = false
+
+[functions.schedule]
+verify_jwt = false
+
+[functions.history]
+verify_jwt = false

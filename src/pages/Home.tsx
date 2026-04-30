@@ -20,18 +20,16 @@ export default function Home() {
   }, []);
 
   const handleLogin = async () => {
-    try {
-      const url = await fetchTikTokAuthUrl();
-      const width = 500;
-      const height = 600;
-      const left = window.screen.width / 2 - width / 2;
-      const top = window.screen.height / 2 - height / 2;
-      window.open(url, 'TikTok Login', `width=${width},height=${height},top=${top},left=${left}`);
-    } catch (err) {
-      console.error(err);
-      alert('TikTok login is unavailable. The Supabase Edge Functions may not be deployed yet.');
-    }
-  };
+      try {
+        const url = await fetchTikTokAuthUrl();
+        // Full-page redirect to TikTok. After consent, TikTok redirects to our
+        // Supabase callback, which then redirects back to /dashboard?uid=...
+        window.location.href = url;
+      } catch (err) {
+        console.error(err);
+        alert('TikTok login is temporarily unavailable. Please try again in a moment.');
+      }
+    };
 
   return (
     <div className="min-h-screen bg-[#050505] text-white selection:bg-brand-primary/30 overflow-x-hidden font-sans">

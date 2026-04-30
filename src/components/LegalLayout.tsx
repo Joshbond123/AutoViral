@@ -51,13 +51,9 @@ export default function LegalLayout({ eyebrow, title, subtitle, lastUpdated, sec
   const handleLogin = async () => {
     try {
       const url = await fetchTikTokAuthUrl();
-      const width = 500;
-      const height = 600;
-      const left = window.screen.width / 2 - width / 2;
-      const top = window.screen.height / 2 - height / 2;
-      window.open(url, 'TikTok Login', `width=${width},height=${height},top=${top},left=${left}`);
+      window.location.href = url;
     } catch {
-      alert('TikTok login is unavailable right now. Please try again shortly.');
+      alert('TikTok login is temporarily unavailable. Please try again in a moment.');
     }
   };
 

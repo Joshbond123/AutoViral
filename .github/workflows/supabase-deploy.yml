@@ -35,6 +35,17 @@ jobs:
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Project ref: $REF"
 
+      - name: Push TikTok credentials to Supabase secrets
+        shell: bash
+        env:
+          PROJECT_REF: ${{ steps.project.outputs.ref }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+        run: |
+          supabase secrets set TIKTOK_CLIENT_KEY="$TIKTOK_CLIENT_KEY" \
+            TIKTOK_CLIENT_SECRET="$TIKTOK_CLIENT_SECRET" \
+            --project-ref "$PROJECT_REF"
+
       - name: Deploy each function
         shell: bash
         env:

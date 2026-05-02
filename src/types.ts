@@ -26,6 +26,7 @@ export interface Schedule {
   scheduled_time: string;
   niche: string;
   status: 'pending' | 'running' | 'success' | 'failed';
+  created_at?: string;
 }
 
 export interface ApiKey {

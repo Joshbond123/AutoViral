@@ -1,152 +1,369 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { Key, RotateCcw, Trash2, Plus, Info, Globe, Github, Database } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Key, Trash2, Plus, Eye, EyeOff, Check, X, AlertCircle, Database, Loader2 } from 'lucide-react';
+import { ApiKey } from '../types';
+import { fetchApiKeys, addApiKey, deleteApiKey, toggleApiKey, updateApiKeyValue } from '../lib/api';
+import { HAS_SUPABASE } from '../lib/supabase';
+
+type Service = ApiKey['service'];
+
+const SERVICE_META: Record<Service, { label: string; description: string; color: string }> = {
+  cerebras: {
+    label: 'Cerebras API',
+    description: 'Used for generating high-retention TikTok scripts.',
+    color: 'text-purple-400',
+  },
+  cloudflare: {
+    label: 'Cloudflare Workers AI',
+    description: 'Generates scene visuals. Requires Account ID and API Token.',
+    color: 'text-orange-400',
+  },
+  unrealspeech: {
+    label: 'UnrealSpeech API',
+    description: 'Provides the voiceover for all video content.',
+    color: 'text-brand-secondary',
+  },
+};
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<'api' | 'github' | 'supabase'>('api');
-
   return (
-    <div className="max-w-5xl">
-      <div className="mb-12">
-        <h1 className="text-4xl font-bold tracking-tight mb-2">Platform Settings</h1>
-        <p className="text-white/40">Manage your credentials, automation tokens, and API key rotation.</p>
+    <div className="max-w-3xl">
+      <div className="mb-8 md:mb-12">
+        <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Platform Settings</h1>
+        <p className="text-white/40 text-sm md:text-base">Manage your API credentials and automation keys.</p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-4 mb-8">
-        {[
-          { id: 'api', label: 'API Key Management', icon: Key },
-          { id: 'github', label: 'GitHub Automation', icon: Github },
-          { id: 'supabase', label: 'Database & Sync', icon: Database },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`flex items-center gap-2 px-6 py-3 rounded-2xl transition-all font-medium text-sm ${
-              activeTab === tab.id 
-                ? 'bg-white/10 text-white border border-white/10' 
-                : 'text-white/40 hover:text-white'
-            }`}
+      <div className="space-y-6 md:space-y-8">
+        {!HAS_SUPABASE && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-3 px-5 py-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm"
           >
-            <tab.icon size={16} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+            <AlertCircle size={18} className="shrink-0" />
+            <p>Supabase is not configured. Set <code className="font-mono text-xs bg-yellow-500/10 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="font-mono text-xs bg-yellow-500/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to enable API key management.</p>
+          </motion.div>
+        )}
 
-      <div className="space-y-8">
-        {activeTab === 'api' && <ApiSettings />}
-        {activeTab === 'github' && <GithubSettings />}
-        {activeTab === 'supabase' && <SupabaseSettings />}
+        <ConnectionStatus />
+        <ApiKeyManager />
       </div>
     </div>
   );
 }
 
-function ApiSettings() {
+function ConnectionStatus() {
   return (
-    <div className="space-y-8">
-      <CredentialSection 
-        title="Cerebras API Keys" 
-        description="Used for generating high-retention TikTok scripts. Keys are rotated automatically."
-        service="cerebras"
-      />
-      <CredentialSection 
-        title="Cloudflare Workers AI" 
-        description="Generates scene visuals for each video. Requires Account ID and API Token."
-        service="cloudflare"
-      />
-      <CredentialSection 
-        title="UnrealSpeech API" 
-        description="Provides the viral energetic male voiceover for all content."
-        service="unrealspeech"
-      />
-    </div>
-  );
-}
-
-function CredentialSection({ title, description, service }: { title: string, description: string, service: string }) {
-  return (
-    <div className="glass rounded-[32px] border border-white/5 overflow-hidden">
-      <div className="p-8 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-bold mb-1">{title}</h3>
-          <p className="text-sm text-white/40">{description}</p>
+    <div className="glass rounded-2xl md:rounded-[32px] p-5 md:p-8 border border-white/5">
+      <div className="flex items-center gap-4 md:gap-6">
+        <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl bg-green-500/10 flex items-center justify-center text-green-500 border border-green-500/10 shrink-0">
+          <Database size={24} />
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 transition-all text-sm font-medium">
-          <Plus size={16} /> Add New Key
-        </button>
+        <div>
+          <h3 className="text-lg md:text-xl font-bold mb-1">Supabase Infrastructure</h3>
+          <p className="text-xs md:text-sm text-white/40">Real-time database and OAuth token storage.</p>
+          <div className="flex items-center gap-2 mt-2">
+            <div className={`w-2 h-2 rounded-full ${HAS_SUPABASE ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[10px] uppercase font-mono tracking-widest text-white/40">
+              {HAS_SUPABASE ? 'Connected' : 'Not configured'}
+            </span>
+          </div>
+        </div>
       </div>
-      <div className="p-8 space-y-4">
-        <div className="bg-black/20 rounded-2xl border border-white/5 p-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="p-2 rounded-lg bg-green-500/10 text-green-500">
-              <Key size={16} />
-            </div>
-            <div>
-              <p className="text-sm font-mono tracking-tight">************************A4F2</p>
-              <div className="flex items-center gap-3 mt-1">
-                <span className="text-[10px] text-white/20 uppercase font-mono">Used: 142 times</span>
-                <span className="text-[10px] text-green-500/50 uppercase font-mono">Status: Active</span>
+    </div>
+  );
+}
+
+function ApiKeyManager() {
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addService, setAddService] = useState<Service>('cerebras');
+  const [addValue, setAddValue] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const load = async () => {
+    if (!HAS_SUPABASE) { setLoading(false); return; }
+    try {
+      const data = await fetchApiKeys();
+      setKeys(data);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const maskKey = (k: string) => {
+    if (k.length <= 8) return '••••••••';
+    return k.slice(0, 4) + '••••••••••••' + k.slice(-4);
+  };
+
+  const handleAdd = async () => {
+    if (!addValue.trim()) return;
+    setAdding(true);
+    try {
+      const newKey = await addApiKey(addService, addValue.trim());
+      setKeys(prev => [...prev, newKey]);
+      setAddValue('');
+      setShowAdd(false);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this API key?')) return;
+    setDeletingId(id);
+    try {
+      await deleteApiKey(id);
+      setKeys(prev => prev.filter(k => k.id !== id));
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleToggle = async (key: ApiKey) => {
+    try {
+      await toggleApiKey(key.id, !key.is_active);
+      setKeys(prev => prev.map(k => k.id === key.id ? { ...k, is_active: !k.is_active } : k));
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  const startEdit = (key: ApiKey) => {
+    setEditingId(key.id);
+    setEditValue(key.key_value);
+  };
+
+  const saveEdit = async () => {
+    if (!editingId || !editValue.trim()) return;
+    setSaving(true);
+    try {
+      await updateApiKeyValue(editingId, editValue.trim());
+      setKeys(prev => prev.map(k => k.id === editingId ? { ...k, key_value: editValue.trim() } : k));
+      setEditingId(null);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleReveal = (id: string) => {
+    setRevealedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // Group by service
+  const services: Service[] = ['cerebras', 'cloudflare', 'unrealspeech'];
+
+  return (
+    <div className="space-y-5 md:space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
+          <Key size={18} className="text-white/40" /> API Key Management
+        </h2>
+        {HAS_SUPABASE && (
+          <button
+            onClick={() => setShowAdd(v => !v)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-sm font-medium transition-all"
+          >
+            <Plus size={16} /> Add Key
+          </button>
+        )}
+      </div>
+
+      {/* Add key panel */}
+      <AnimatePresence>
+        {showAdd && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="glass rounded-2xl border border-brand-primary/20 p-5 space-y-4">
+              <h3 className="font-bold text-sm">Add New API Key</h3>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">Service</label>
+                  <select
+                    value={addService}
+                    onChange={e => setAddService(e.target.value as Service)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-brand-primary/50 appearance-none"
+                  >
+                    {services.map(s => (
+                      <option key={s} value={s} className="bg-surface">{SERVICE_META[s].label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">API Key Value</label>
+                  <input
+                    type="password"
+                    placeholder="sk-••••••••"
+                    value={addValue}
+                    onChange={e => setAddValue(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-brand-primary/50 font-mono"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAdd}
+                  disabled={adding || !addValue.trim()}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl tiktok-gradient text-sm font-bold disabled:opacity-50"
+                >
+                  {adding ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  {adding ? 'Saving…' : 'Add Key'}
+                </button>
+                <button
+                  onClick={() => { setShowAdd(false); setAddValue(''); }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-sm font-medium transition-all"
+                >
+                  <X size={14} /> Cancel
+                </button>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="p-2 text-white/20 hover:text-white transition-all"><RotateCcw size={14} /></button>
-            <button className="p-2 text-white/20 hover:text-red-500 transition-all"><Trash2 size={14} /></button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-white/20 ml-2">
-          <Info size={12} />
-          <p>Continuous rotation enabled. Failover will shift to next valid key automatically.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-function GithubSettings() {
-  const [token, setToken] = useState('****************************************');
-  return (
-    <div className="glass rounded-[32px] p-8 border border-white/5 space-y-8">
-      <div>
-        <h3 className="text-xl font-bold mb-1">GitHub Personal Access Token</h3>
-        <p className="text-sm text-white/40">Required to trigger GitHub Actions and render videos via Remotion.</p>
-      </div>
-      <div className="space-y-4 max-w-2xl">
-        <div className="space-y-2">
-          <label className="text-[10px] uppercase font-mono tracking-widest text-white/40 ml-1">PAT Token (repo & workflow scope)</label>
-          <input 
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            className="w-full bg-white/5 border border-white/5 rounded-2xl py-4 px-6 focus:outline-none focus:border-brand-primary/50 transition-all font-mono text-sm"
-          />
+      {loading ? (
+        <div className="glass rounded-2xl border border-white/5 p-10 text-center text-white/20 text-sm flex items-center justify-center gap-2">
+          <Loader2 size={16} className="animate-spin" /> Loading keys…
         </div>
-        <button className="px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition-all text-sm font-medium border border-white/5">
-          Save Token
-        </button>
-      </div>
-    </div>
-  );
-}
+      ) : error ? (
+        <div className="glass rounded-2xl border border-red-500/20 p-6 text-red-400 text-sm flex items-center gap-2">
+          <AlertCircle size={16} /> {error}
+        </div>
+      ) : (
+        services.map(service => {
+          const serviceKeys = keys.filter(k => k.service === service);
+          const meta = SERVICE_META[service];
+          return (
+            <div key={service} className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
+              <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-sm md:text-base">{meta.label}</h3>
+                  <p className="text-xs text-white/40 mt-0.5">{meta.description}</p>
+                </div>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-white/20">
+                  {serviceKeys.length} key{serviceKeys.length !== 1 ? 's' : ''}
+                </span>
+              </div>
 
-function SupabaseSettings() {
-  return (
-    <div className="glass rounded-[32px] p-8 border border-white/5 space-y-8">
-      <div className="flex items-center gap-6">
-        <div className="w-16 h-16 rounded-2xl bg-green-500/10 flex items-center justify-center text-green-500 border border-green-500/10">
-          <Database size={32} />
-        </div>
-        <div>
-          <h3 className="text-xl font-bold mb-1">Supabase Infrastructure</h3>
-          <p className="text-sm text-white/40">Real-time database and OAuth token storage is connected.</p>
-          <div className="flex items-center gap-2 mt-2">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-[10px] uppercase font-mono tracking-widest opacity-40">Healthy / 12ms Latency</span>
-          </div>
-        </div>
-      </div>
+              <div className="p-4 md:p-6 space-y-3">
+                {serviceKeys.length === 0 ? (
+                  <p className="text-xs text-white/20 font-mono text-center py-4">No keys configured</p>
+                ) : (
+                  serviceKeys.map(key => (
+                    <div key={key.id} className="bg-black/20 rounded-xl border border-white/5 p-4">
+                      {editingId === key.id ? (
+                        <div className="space-y-3">
+                          <input
+                            type="text"
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm font-mono focus:outline-none focus:border-brand-primary/50"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={saveEdit}
+                              disabled={saving}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg tiktok-gradient text-xs font-bold disabled:opacity-50"
+                            >
+                              {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                              {saving ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              onClick={() => setEditingId(null)}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-all"
+                            >
+                              <X size={12} /> Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`p-1.5 rounded-lg bg-white/5 ${meta.color} shrink-0`}>
+                              <Key size={14} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs md:text-sm font-mono tracking-tight truncate">
+                                {revealedIds.has(key.id) ? key.key_value : maskKey(key.key_value)}
+                              </p>
+                              <div className="flex items-center gap-3 mt-0.5">
+                                <span className={`text-[10px] uppercase font-mono ${key.is_active ? 'text-green-500/60' : 'text-white/20'}`}>
+                                  {key.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                                {key.request_count > 0 && (
+                                  <span className="text-[10px] text-white/20 font-mono">
+                                    {key.request_count} requests
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => toggleReveal(key.id)}
+                              className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
+                              title={revealedIds.has(key.id) ? 'Hide' : 'Reveal'}
+                            >
+                              {revealedIds.has(key.id) ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                            <button
+                              onClick={() => startEdit(key)}
+                              className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
+                              title="Edit"
+                            >
+                              <Key size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleToggle(key)}
+                              className={`p-1.5 rounded-lg text-xs font-mono transition-all ${key.is_active ? 'hover:bg-yellow-500/10 text-yellow-500/50 hover:text-yellow-400' : 'hover:bg-green-500/10 text-green-500/50 hover:text-green-400'}`}
+                              title={key.is_active ? 'Deactivate' : 'Activate'}
+                            >
+                              {key.is_active ? <X size={14} /> : <Check size={14} />}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(key.id)}
+                              disabled={deletingId === key.id}
+                              className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all disabled:opacity-50"
+                              title="Delete"
+                            >
+                              {deletingId === key.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

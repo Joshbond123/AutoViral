@@ -1,257 +1,283 @@
 import { motion } from 'motion/react';
-  import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2, LogOut } from 'lucide-react';
-  import { useEffect, useState } from 'react';
-  import { useNavigate } from 'react-router-dom';
-  import { Post } from '../types';
-  import { fetchHistory, fetchProfile, TikTokProfile } from '../lib/api';
+import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2, LogOut, TrendingUp } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Post } from '../types';
+import { fetchHistory, fetchProfile, TikTokProfile, fetchScheduledCount } from '../lib/api';
 
-  export default function Dashboard() {
-    const [posts, setPosts] = useState<Post[]>([]);
-    const [profile, setProfile] = useState<TikTokProfile | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [profileError, setProfileError] = useState<string | null>(null);
-    const navigate = useNavigate();
+export default function Dashboard() {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [profile, setProfile] = useState<TikTokProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [scheduledCount, setScheduledCount] = useState<number>(0);
+  const navigate = useNavigate();
 
-    useEffect(() => {
-      const userId = localStorage.getItem('tiktok_user_id');
-      if (!userId) {
-        setLoading(false);
-        return;
+  useEffect(() => {
+    const userId = localStorage.getItem('tiktok_user_id');
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const [historyRes, profileRes, schedCountRes] = await Promise.allSettled([
+        fetchHistory(userId),
+        fetchProfile(userId),
+        fetchScheduledCount(userId),
+      ]);
+      if (cancelled) return;
+
+      if (historyRes.status === 'fulfilled') {
+        setPosts(Array.isArray(historyRes.value) ? (historyRes.value as Post[]) : []);
       }
 
-      let cancelled = false;
-      (async () => {
-        const [historyRes, profileRes] = await Promise.allSettled([
-          fetchHistory(userId),
-          fetchProfile(userId),
-        ]);
-        if (cancelled) return;
+      if (profileRes.status === 'fulfilled') {
+        setProfile(profileRes.value);
+      } else {
+        setProfileError(String((profileRes.reason as Error)?.message ?? profileRes.reason));
+      }
 
-        if (historyRes.status === 'fulfilled') {
-          setPosts(Array.isArray(historyRes.value) ? (historyRes.value as Post[]) : []);
-        } else {
-          console.error('history fetch failed', historyRes.reason);
-        }
+      if (schedCountRes.status === 'fulfilled') {
+        setScheduledCount(schedCountRes.value);
+      }
 
-        if (profileRes.status === 'fulfilled') {
-          setProfile(profileRes.value);
-        } else {
-          console.error('profile fetch failed', profileRes.reason);
-          setProfileError(String(profileRes.reason?.message ?? profileRes.reason));
-        }
+      setLoading(false);
+    })();
 
-        setLoading(false);
-      })();
+    return () => { cancelled = true; };
+  }, []);
 
-      return () => {
-        cancelled = true;
-      };
-    }, []);
+  const handleSignOut = () => {
+    localStorage.removeItem('tiktok_user_id');
+    navigate('/');
+  };
 
-    const handleSignOut = () => {
-      localStorage.removeItem('tiktok_user_id');
-      navigate('/');
-    };
+  const publishedPosts = posts.filter(p => p.status === 'published');
+  const successRate = posts.length > 0
+    ? Math.round((publishedPosts.length / posts.length) * 100)
+    : null;
 
-    const stats = [
-      { label: 'Total Posts', value: posts.length, icon: Video, color: 'text-brand-secondary' },
-      { label: 'Scheduled', value: '4', icon: Clock, color: 'text-yellow-500' },
-      { label: 'Success Rate', value: '98%', icon: CheckCircle2, color: 'text-green-500' },
-      { label: 'Avg View Duration', value: '42s', icon: Eye, color: 'text-brand-primary' },
-    ];
+  const stats = [
+    { label: 'Total Posts', value: loading ? '…' : String(posts.length), icon: Video, color: 'text-brand-secondary' },
+    { label: 'Scheduled', value: loading ? '…' : String(scheduledCount), icon: Clock, color: 'text-yellow-500' },
+    { label: 'Published', value: loading ? '…' : String(publishedPosts.length), icon: CheckCircle2, color: 'text-green-500' },
+    { label: 'Success Rate', value: loading ? '…' : successRate !== null ? `${successRate}%` : 'N/A', icon: TrendingUp, color: 'text-brand-primary' },
+  ];
 
-    return (
-      <div className="space-y-12">
-        {/* Header */}
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Welcome back, Creator</h1>
-          <p className="text-white/40">Your TikTok automation pipeline is active and healthy.</p>
-        </div>
+  return (
+    <div className="space-y-8 md:space-y-12">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Welcome back, Creator</h1>
+        <p className="text-white/40 text-sm md:text-base">Your TikTok automation pipeline is active.</p>
+      </div>
 
-        {/* Connected TikTok account */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass rounded-[32px] p-6 md:p-8 border border-brand-primary/20 bg-brand-primary/[0.03]"
-        >
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="flex items-center gap-5">
-              <div className="relative">
-                {profile?.avatar_url ? (
-                  <img
-                    src={profile.avatar_url}
-                    alt={profile.username ?? 'TikTok user'}
-                    className="w-16 h-16 rounded-full object-cover border-2 border-brand-primary/40"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/30">
-                    <Video size={24} />
-                  </div>
-                )}
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-green-500 border-2 border-[#0a0a0a]" />
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.25em] font-mono text-brand-primary mb-1">
-                  Connected TikTok account
-                </p>
-                <h2 className="text-2xl font-bold tracking-tight">
-                  {loading ? 'Loading…' : profile?.username || 'TikTok creator'}
-                </h2>
-                <p className="text-white/40 text-xs font-mono mt-1">
-                  open_id: {profile?.id ? `${profile.id.slice(0, 12)}…` : '—'}
-                </p>
-                {profileError && (
-                  <p className="text-red-400 text-xs mt-1">Profile error: {profileError}</p>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="px-3 py-1.5 rounded-full bg-brand-primary/15 border border-brand-primary/30 text-brand-primary text-[10px] font-bold uppercase tracking-widest">
-                user.info.basic
-              </span>
-              <span className="px-3 py-1.5 rounded-full bg-brand-secondary/15 border border-brand-secondary/30 text-brand-secondary text-[10px] font-bold uppercase tracking-widest">
-                video.upload
-              </span>
-              <button
-                onClick={handleSignOut}
-                className="ml-2 flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-all"
-              >
-                <LogOut size={12} /> Sign out
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {stats.map((stat, i) => (
-            <motion.div
-              key={stat.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="p-6 rounded-3xl glass border border-white/5"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className={`p-3 rounded-2xl bg-white/5 ${stat.color}`}>
-                  <stat.icon size={20} />
+      {/* Connected TikTok account */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass rounded-2xl md:rounded-[32px] p-5 md:p-8 border border-brand-primary/20 bg-brand-primary/[0.03]"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-6">
+          <div className="flex items-center gap-4 md:gap-5">
+            <div className="relative shrink-0">
+              {profile?.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={profile.username ?? 'TikTok user'}
+                  className="w-14 h-14 md:w-16 md:h-16 rounded-full object-cover border-2 border-brand-primary/40"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/30">
+                  <Video size={24} />
                 </div>
-                <span className="text-[10px] uppercase font-mono tracking-widest text-white/20">Real-time</span>
+              )}
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 md:w-5 md:h-5 rounded-full bg-green-500 border-2 border-[#0a0a0a]" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.25em] font-mono text-brand-primary mb-1">
+                Connected TikTok account
+              </p>
+              <h2 className="text-xl md:text-2xl font-bold tracking-tight truncate">
+                {loading ? 'Loading…' : profile?.username || 'TikTok creator'}
+              </h2>
+              <p className="text-white/40 text-xs font-mono mt-1">
+                {profile?.id ? `ID: ${profile.id.slice(0, 12)}…` : '—'}
+              </p>
+              {profileError && (
+                <p className="text-red-400 text-xs mt-1 truncate">Error: {profileError}</p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="self-start sm:self-auto flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-all"
+          >
+            <LogOut size={12} /> Sign out
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+        {stats.map((stat, i) => (
+          <motion.div
+            key={stat.label}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.1 }}
+            className="p-4 md:p-6 rounded-2xl md:rounded-3xl glass border border-white/5"
+          >
+            <div className="flex items-center justify-between mb-3 md:mb-4">
+              <div className={`p-2 md:p-3 rounded-xl md:rounded-2xl bg-white/5 ${stat.color}`}>
+                <stat.icon size={16} className="md:w-5 md:h-5" />
               </div>
-              <p className="text-white/40 text-sm mb-1">{stat.label}</p>
-              <h3 className="text-3xl font-bold font-mono tracking-tighter">{stat.value}</h3>
-            </motion.div>
-          ))}
+              <span className="text-[9px] md:text-[10px] uppercase font-mono tracking-widest text-white/20 hidden sm:block">Live</span>
+            </div>
+            <p className="text-white/40 text-xs md:text-sm mb-1">{stat.label}</p>
+            <h3 className="text-2xl md:text-3xl font-bold font-mono tracking-tighter">{stat.value}</h3>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Recent History Table */}
+      <div className="space-y-4 md:space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight">Recent Post History</h2>
         </div>
 
-        {/* Recent History Table */}
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight">Recent Post History</h2>
-            <button className="text-sm font-medium text-brand-secondary hover:underline">View All</button>
+        <div className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
+          {/* Mobile card layout */}
+          <div className="md:hidden divide-y divide-white/5">
+            {loading ? (
+              <div className="px-5 py-10 text-center text-white/20 text-sm">Loading history...</div>
+            ) : posts.length === 0 ? (
+              <div className="px-5 py-10 text-center text-white/20 uppercase tracking-widest text-xs font-mono">No posts yet</div>
+            ) : (
+              posts.map((post) => (
+                <div key={post.id} className="p-4 flex items-center gap-4">
+                  <div className="w-10 h-14 rounded-lg bg-surface-lighter overflow-hidden border border-white/10 shrink-0">
+                    {post.thumbnail_url ? (
+                      <img src={post.thumbnail_url} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white/10">
+                        <Play size={14} fill="currentColor" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">{post.title || post.topic}</p>
+                    <p className="text-white/40 text-xs truncate">{post.niche}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <StatusBadge status={post.status} />
+                      <span className="text-xs text-white/30 font-mono">
+                        {post.published_at ? new Date(post.published_at).toLocaleDateString() : 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
-          <div className="glass rounded-[32px] border border-white/5 overflow-hidden">
-            <table className="w-full text-left">
-              <thead className="bg-white/5 border-b border-white/5">
+          {/* Desktop table layout */}
+          <table className="hidden md:table w-full text-left">
+            <thead className="bg-white/5 border-b border-white/5">
+              <tr>
+                <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Video</th>
+                <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Topic / Niche</th>
+                <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Status</th>
+                <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Date</th>
+                <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {loading ? (
                 <tr>
-                  <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Video</th>
-                  <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium whitespace-nowrap">Topic / Niche</th>
-                  <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Status</th>
-                  <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Date</th>
-                  <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Duration</th>
-                  <th className="px-6 py-4 text-xs uppercase font-mono tracking-widest text-white/40 font-medium">Actions</th>
+                  <td colSpan={5} className="px-6 py-12 text-center text-white/20">Loading your history...</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {loading ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-white/20">Loading your history...</td>
+              ) : posts.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-white/20 uppercase tracking-widest text-xs font-mono">No posts generated yet</td>
+                </tr>
+              ) : (
+                posts.map((post) => (
+                  <tr key={post.id} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-16 rounded-lg bg-surface-lighter overflow-hidden border border-white/10 shrink-0">
+                          {post.thumbnail_url ? (
+                            <img src={post.thumbnail_url} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-white/10">
+                              <Play size={16} fill="currentColor" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="max-w-[200px]">
+                          <p className="font-semibold text-sm truncate">{post.title || post.topic}</p>
+                          <p className="text-white/40 text-xs truncate">ID: {post.id.substring(0, 8)}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">{post.topic}</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary font-mono uppercase tracking-wider">{post.niche}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <StatusBadge status={post.status} />
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-white/60">{post.published_at ? new Date(post.published_at).toLocaleDateString() : 'N/A'}</p>
+                      <p className="text-xs text-white/20 font-mono">{post.published_at ? new Date(post.published_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
+                          <BarChart2 size={16} />
+                        </button>
+                        <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
+                          <Share2 size={16} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                ) : posts.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-white/20 uppercase tracking-widest text-xs font-mono">No posts generated yet</td>
-                  </tr>
-                ) : (
-                  posts.map((post) => (
-                    <tr key={post.id} className="hover:bg-white/[0.02] transition-colors group">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-16 rounded-lg bg-surface-lighter overflow-hidden relative border border-white/10 shrink-0">
-                            {post.thumbnail_url ? (
-                              <img src={post.thumbnail_url} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white/10">
-                                <Play size={16} fill="currentColor" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="max-w-[200px]">
-                            <p className="font-semibold text-sm truncate">{post.title || post.topic}</p>
-                            <p className="text-white/40 text-xs truncate">ID: {post.id.substring(0, 8)}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium">{post.topic}</p>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary font-mono uppercase tracking-wider">{post.niche}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={post.status} />
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-sm text-white/60">{post.published_at ? new Date(post.published_at).toLocaleDateString() : 'N/A'}</p>
-                        <p className="text-xs text-white/20 font-mono italic">{post.published_at ? new Date(post.published_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-xs font-mono text-white/60">{post.duration || '00:15'}s</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
-                            <BarChart2 size={16} />
-                          </button>
-                          <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
-                            <Share2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  function StatusBadge({ status }: { status: Post['status'] }) {
-    const styles = {
-      pending: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-      processing: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-      published: 'bg-green-500/10 text-green-500 border-green-500/20',
-      failed: 'bg-red-500/10 text-red-500 border-red-500/20',
-    };
+function StatusBadge({ status }: { status: Post['status'] }) {
+  const styles = {
+    pending: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+    processing: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+    published: 'bg-green-500/10 text-green-500 border-green-500/20',
+    failed: 'bg-red-500/10 text-red-500 border-red-500/20',
+  };
 
-    const icons = {
-      pending: Clock,
-      processing: AlertCircle,
-      published: CheckCircle2,
-      failed: AlertCircle,
-    };
+  const icons = {
+    pending: Clock,
+    processing: AlertCircle,
+    published: CheckCircle2,
+    failed: AlertCircle,
+  };
 
-    const Icon = icons[status];
+  const Icon = icons[status];
 
-    return (
-      <span className={`flex items-center gap-1.5 w-fit px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${styles[status]}`}>
-        <Icon size={10} strokeWidth={3} />
-        {status}
-      </span>
-    );
-  }
-  
+  return (
+    <span className={`flex items-center gap-1.5 w-fit px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${styles[status]}`}>
+      <Icon size={10} strokeWidth={3} />
+      {status}
+    </span>
+  );
+}

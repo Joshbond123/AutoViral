@@ -114,7 +114,7 @@ Return ONLY the topic title — nothing else, no quotes, no extra text.`;
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-4-scout-17b-16e-instruct',
+        model: 'qwen-3-235b-a22b-instruct-2507',
         max_tokens: 80,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -158,7 +158,7 @@ Return ONLY valid JSON (no markdown, no explanation):
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-4-scout-17b-16e-instruct',
+        model: 'qwen-3-235b-a22b-instruct-2507',
         max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),

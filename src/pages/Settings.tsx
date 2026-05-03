@@ -1,32 +1,41 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Key, Trash2, Plus, Eye, EyeOff, Check, X, AlertCircle, Database, Loader2 } from 'lucide-react';
+import {
+  Key, Trash2, Plus, Eye, EyeOff, Check, X,
+  AlertCircle, Database, Loader2, RefreshCw,
+  Activity, Clock, TrendingUp, Shield,
+} from 'lucide-react';
 import { ApiKey } from '../types';
-import { fetchApiKeys, addApiKey, deleteApiKey, toggleApiKey, updateApiKeyValue } from '../lib/api';
+import {
+  fetchApiKeys, addApiKey, deleteApiKey, toggleApiKey,
+  updateApiKeyValue, resetKeyStatus, subscribeToApiKeys,
+} from '../lib/api';
 import { HAS_SUPABASE } from '../lib/supabase';
 
 type Service = ApiKey['service'];
+type KeyStatus = 'active' | 'rate_limited' | 'failed';
 
 interface ServiceGroup {
   label: string;
   description: string;
   color: string;
+  accentBg: string;
   fields: { service: Service; fieldLabel: string; placeholder: string }[];
 }
 
 const SERVICE_GROUPS: ServiceGroup[] = [
   {
     label: 'Cerebras API',
-    description: 'Used for generating high-retention TikTok scripts.',
+    description: 'AI script generation. Add multiple keys for automatic rotation.',
     color: 'text-purple-400',
-    fields: [
-      { service: 'cerebras', fieldLabel: 'API Key', placeholder: 'csk-••••••••' },
-    ],
+    accentBg: 'bg-purple-500/10',
+    fields: [{ service: 'cerebras', fieldLabel: 'API Key', placeholder: 'csk-••••••••' }],
   },
   {
     label: 'Cloudflare Workers AI',
-    description: 'Generates scene visuals. Both Account ID and API Token are required.',
+    description: 'Scene image generation. Both Account ID and API Token required.',
     color: 'text-orange-400',
+    accentBg: 'bg-orange-500/10',
     fields: [
       { service: 'cloudflare_id', fieldLabel: 'Account ID', placeholder: 'a1b2c3d4e5f6g7h8…' },
       { service: 'cloudflare', fieldLabel: 'API Token', placeholder: 'Bearer ••••••••' },
@@ -34,11 +43,10 @@ const SERVICE_GROUPS: ServiceGroup[] = [
   },
   {
     label: 'UnrealSpeech API',
-    description: 'Provides the voiceover for all video content.',
-    color: 'text-brand-secondary',
-    fields: [
-      { service: 'unrealspeech', fieldLabel: 'API Key', placeholder: 'sk-••••••••' },
-    ],
+    description: 'TTS voiceover. Add multiple keys for load distribution.',
+    color: 'text-cyan-400',
+    accentBg: 'bg-cyan-500/10',
+    fields: [{ service: 'unrealspeech', fieldLabel: 'API Key', placeholder: 'sk-••••••••' }],
   },
 ];
 
@@ -51,12 +59,41 @@ const SERVICE_LABEL: Record<Service, string> = {
   unrealspeech: 'UnrealSpeech — API Key',
 };
 
+function timeAgo(iso?: string): string {
+  if (!iso) return 'Never';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
+}
+
+function successRate(key: ApiKey): string {
+  if (key.request_count === 0) return '—';
+  return `${Math.round((key.success_count / key.request_count) * 100)}%`;
+}
+
+function StatusBadge({ status }: { status: KeyStatus }) {
+  const cfg = {
+    active: { label: 'Active', cls: 'bg-green-500/15 text-green-400 border-green-500/20', dot: 'bg-green-400' },
+    rate_limited: { label: 'Rate Limited', cls: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20', dot: 'bg-yellow-400' },
+    failed: { label: 'Failed', cls: 'bg-red-500/15 text-red-400 border-red-500/20', dot: 'bg-red-400' },
+  }[status] ?? { label: 'Active', cls: 'bg-green-500/15 text-green-400 border-green-500/20', dot: 'bg-green-400' };
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-mono uppercase tracking-widest ${cfg.cls}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${status === 'active' ? 'animate-pulse' : ''}`} />
+      {cfg.label}
+    </span>
+  );
+}
+
 export default function Settings() {
   return (
     <div className="max-w-3xl">
       <div className="mb-8 md:mb-12">
         <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Platform Settings</h1>
-        <p className="text-white/40 text-sm md:text-base">Manage your API credentials and automation keys.</p>
+        <p className="text-white/40 text-sm md:text-base">Manage API credentials with automatic key rotation and usage tracking.</p>
       </div>
 
       <div className="space-y-6 md:space-y-8">
@@ -67,15 +104,12 @@ export default function Settings() {
             className="flex items-center gap-3 px-5 py-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-sm"
           >
             <AlertCircle size={18} className="shrink-0" />
-            <p>
-              Supabase is not configured. Set{' '}
-              <code className="font-mono text-xs bg-yellow-500/10 px-1 rounded">VITE_SUPABASE_URL</code> and{' '}
-              <code className="font-mono text-xs bg-yellow-500/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to enable API key management.
-            </p>
+            <p>Supabase is not configured. Set <code className="font-mono text-xs bg-yellow-500/10 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="font-mono text-xs bg-yellow-500/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to enable key management.</p>
           </motion.div>
         )}
 
         <ConnectionStatus />
+        <RotationBanner />
         <ApiKeyManager />
       </div>
     </div>
@@ -91,12 +125,42 @@ function ConnectionStatus() {
         </div>
         <div>
           <h3 className="text-lg md:text-xl font-bold mb-1">Supabase Infrastructure</h3>
-          <p className="text-xs md:text-sm text-white/40">Real-time database and OAuth token storage.</p>
+          <p className="text-xs md:text-sm text-white/40">Real-time database and credential storage.</p>
           <div className="flex items-center gap-2 mt-2">
             <div className={`w-2 h-2 rounded-full ${HAS_SUPABASE ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
             <span className="text-[10px] uppercase font-mono tracking-widest text-white/40">
               {HAS_SUPABASE ? 'Connected' : 'Not configured'}
             </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RotationBanner() {
+  return (
+    <div className="glass rounded-2xl border border-brand-primary/10 p-5 md:p-6">
+      <div className="flex items-start gap-4">
+        <div className="w-10 h-10 rounded-xl bg-brand-primary/10 flex items-center justify-center text-brand-primary shrink-0 mt-0.5">
+          <Shield size={20} />
+        </div>
+        <div>
+          <h3 className="font-bold text-sm md:text-base mb-1">Automatic Key Rotation Enabled</h3>
+          <p className="text-xs text-white/40 leading-relaxed">
+            When multiple keys are added for the same service, the pipeline automatically rotates between them — using the least-used key first.
+            If a key hits a rate limit, it is temporarily skipped and the next key takes over. Failed keys are bypassed automatically.
+          </p>
+          <div className="flex flex-wrap gap-3 mt-3">
+            {[
+              { icon: TrendingUp, label: 'Round-robin rotation' },
+              { icon: Activity, label: 'Auto-skip on rate limit' },
+              { icon: RefreshCw, label: 'Real-time usage tracking' },
+            ].map(({ icon: Icon, label }) => (
+              <span key={label} className="flex items-center gap-1.5 text-[10px] uppercase font-mono tracking-widest text-white/30 border border-white/5 px-3 py-1.5 rounded-full">
+                <Icon size={11} /> {label}
+              </span>
+            ))}
           </div>
         </div>
       </div>
@@ -120,8 +184,9 @@ function ApiKeyManager() {
 
   const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!HAS_SUPABASE) { setLoading(false); return; }
     try {
       const data = await fetchApiKeys();
@@ -131,9 +196,23 @@ function ApiKeyManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Real-time subscription
+  useEffect(() => {
+    if (!HAS_SUPABASE) return;
+    const unsub = subscribeToApiKeys(({ eventType, key }) => {
+      setKeys(prev => {
+        if (eventType === 'INSERT') return [...prev, key];
+        if (eventType === 'UPDATE') return prev.map(k => k.id === key.id ? { ...k, ...key } : k);
+        if (eventType === 'DELETE') return prev.filter(k => k.id !== key.id);
+        return prev;
+      });
+    });
+    return unsub;
+  }, []);
 
   const maskKey = (k: string) => {
     if (k.length <= 8) return '••••••••';
@@ -144,8 +223,7 @@ function ApiKeyManager() {
     if (!addValue.trim()) return;
     setAdding(true);
     try {
-      const newKey = await addApiKey(addService, addValue.trim());
-      setKeys(prev => [...prev, newKey]);
+      await addApiKey(addService, addValue.trim());
       setAddValue('');
       setShowAdd(false);
     } catch (e) {
@@ -160,7 +238,6 @@ function ApiKeyManager() {
     setDeletingId(id);
     try {
       await deleteApiKey(id);
-      setKeys(prev => prev.filter(k => k.id !== id));
     } catch (e) {
       alert((e as Error).message);
     } finally {
@@ -171,9 +248,19 @@ function ApiKeyManager() {
   const handleToggle = async (key: ApiKey) => {
     try {
       await toggleApiKey(key.id, !key.is_active);
-      setKeys(prev => prev.map(k => k.id === key.id ? { ...k, is_active: !k.is_active } : k));
     } catch (e) {
       alert((e as Error).message);
+    }
+  };
+
+  const handleReset = async (id: string) => {
+    setResettingId(id);
+    try {
+      await resetKeyStatus(id);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setResettingId(null);
     }
   };
 
@@ -187,7 +274,6 @@ function ApiKeyManager() {
     setSaving(true);
     try {
       await updateApiKeyValue(editingId, editValue.trim());
-      setKeys(prev => prev.map(k => k.id === editingId ? { ...k, key_value: editValue.trim() } : k));
       setEditingId(null);
     } catch (e) {
       alert((e as Error).message);
@@ -199,13 +285,19 @@ function ApiKeyManager() {
   const toggleReveal = (id: string) => {
     setRevealedIds(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
 
+  // Stats summary
+  const totalRequests = keys.reduce((s, k) => s + k.request_count, 0);
+  const activeCount = keys.filter(k => k.is_active && k.status === 'active').length;
+  const rateLimitedCount = keys.filter(k => k.status === 'rate_limited').length;
+
   return (
     <div className="space-y-5 md:space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
           <Key size={18} className="text-white/40" /> API Key Management
@@ -219,6 +311,22 @@ function ApiKeyManager() {
           </button>
         )}
       </div>
+
+      {/* Stats row */}
+      {!loading && keys.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Total Requests', value: totalRequests.toLocaleString(), color: 'text-white' },
+            { label: 'Active Keys', value: activeCount, color: 'text-green-400' },
+            { label: 'Rate Limited', value: rateLimitedCount, color: rateLimitedCount > 0 ? 'text-yellow-400' : 'text-white/30' },
+          ].map(s => (
+            <div key={s.label} className="glass rounded-xl border border-white/5 p-4 text-center">
+              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+              <p className="text-[10px] uppercase font-mono tracking-widest text-white/30 mt-1">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Add key panel */}
       <AnimatePresence>
@@ -287,137 +395,181 @@ function ApiKeyManager() {
       ) : (
         SERVICE_GROUPS.map(group => {
           const groupKeys = keys.filter(k => group.fields.some(f => f.service === k.service));
+          const configuredCount = group.fields.filter(f => keys.some(k => k.service === f.service)).length;
+
           return (
             <div key={group.label} className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
-              {/* Group header */}
-              <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h3 className="font-bold text-sm md:text-base">{group.label}</h3>
-                  <p className="text-xs text-white/40 mt-0.5">{group.description}</p>
+              <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-bold text-sm md:text-base">{group.label}</h3>
+                    <p className="text-xs text-white/40 mt-0.5">{group.description}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-white/20">
+                      {configuredCount}/{group.fields.length} configured
+                    </span>
+                    {groupKeys.length > 1 && (
+                      <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-brand-primary/60 border border-brand-primary/20 px-2 py-0.5 rounded-full">
+                        <RefreshCw size={9} /> rotating
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <span className="text-[10px] font-mono uppercase tracking-widest text-white/20 shrink-0">
-                  {groupKeys.length}/{group.fields.length} configured
-                </span>
               </div>
 
-              <div className="p-4 md:p-6 space-y-5">
+              <div className="p-4 md:p-6 space-y-6">
                 {group.fields.map(({ service, fieldLabel, placeholder }) => {
                   const fieldKeys = keys.filter(k => k.service === service);
+                  const hasMultiple = fieldKeys.length > 1;
 
                   return (
-                    <div key={service} className="space-y-2">
-                      {/* Field label row */}
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] uppercase font-mono tracking-widest font-bold ${group.color}`}>
-                          {fieldLabel}
-                        </span>
-                        {group.fields.length > 1 && (
-                          <span className="text-[9px] font-mono text-white/20 uppercase tracking-widest border border-white/10 px-1.5 py-0.5 rounded-full">
-                            {service === 'cloudflare_id' ? 'account_id' : 'api_token'}
+                    <div key={service} className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] uppercase font-mono tracking-widest font-bold ${group.color}`}>
+                            {fieldLabel}
                           </span>
+                          {group.fields.length > 1 && (
+                            <span className="text-[9px] font-mono text-white/20 uppercase tracking-widest border border-white/10 px-1.5 py-0.5 rounded-full">
+                              {service === 'cloudflare_id' ? 'account_id' : 'api_token'}
+                            </span>
+                          )}
+                          {hasMultiple && (
+                            <span className="text-[9px] font-mono text-brand-primary/60 uppercase tracking-widest border border-brand-primary/15 px-1.5 py-0.5 rounded-full">
+                              {fieldKeys.length} keys
+                            </span>
+                          )}
+                        </div>
+                        {HAS_SUPABASE && (
+                          <button
+                            onClick={() => { setAddService(service); setAddValue(''); setShowAdd(true); }}
+                            className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-white/30 hover:text-white transition-all"
+                          >
+                            <Plus size={10} /> Add
+                          </button>
                         )}
                       </div>
 
                       {fieldKeys.length === 0 ? (
-                        /* Empty state with inline "Add" shortcut */
                         <div className="flex items-center gap-3 p-4 rounded-xl border border-dashed border-white/10 bg-white/[0.015]">
                           <AlertCircle size={14} className="text-white/20 shrink-0" />
                           <p className="text-xs text-white/20 font-mono flex-1">Not configured</p>
-                          {HAS_SUPABASE && (
-                            <button
-                              onClick={() => { setAddService(service); setAddValue(''); setShowAdd(true); }}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-all text-white/50 hover:text-white"
-                            >
-                              <Plus size={12} /> Add
-                            </button>
-                          )}
                         </div>
                       ) : (
-                        fieldKeys.map(key => (
-                          <div key={key.id} className="bg-black/20 rounded-xl border border-white/5 p-4">
-                            {editingId === key.id ? (
-                              <div className="space-y-3">
-                                <input
-                                  type="text"
-                                  value={editValue}
-                                  onChange={e => setEditValue(e.target.value)}
-                                  placeholder={placeholder}
-                                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm font-mono focus:outline-none focus:border-brand-primary/50"
-                                />
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={saveEdit}
-                                    disabled={saving}
-                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg tiktok-gradient text-xs font-bold disabled:opacity-50"
-                                  >
-                                    {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                    {saving ? 'Saving…' : 'Save'}
-                                  </button>
-                                  <button
-                                    onClick={() => setEditingId(null)}
-                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-all"
-                                  >
-                                    <X size={12} /> Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className={`p-1.5 rounded-lg bg-white/5 ${group.color} shrink-0`}>
-                                    <Key size={14} />
+                        <div className="space-y-2">
+                          {fieldKeys.map((key, keyIdx) => (
+                            <motion.div
+                              key={key.id}
+                              layout
+                              className={`bg-black/20 rounded-xl border overflow-hidden ${
+                                key.status === 'rate_limited'
+                                  ? 'border-yellow-500/20'
+                                  : key.status === 'failed'
+                                  ? 'border-red-500/20'
+                                  : 'border-white/5'
+                              }`}
+                            >
+                              {editingId === key.id ? (
+                                <div className="p-4 space-y-3">
+                                  <input
+                                    type="text"
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    placeholder={placeholder}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm font-mono focus:outline-none focus:border-brand-primary/50"
+                                  />
+                                  <div className="flex gap-2">
+                                    <button onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 rounded-lg tiktok-gradient text-xs font-bold disabled:opacity-50">
+                                      {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                      {saving ? 'Saving…' : 'Save'}
+                                    </button>
+                                    <button onClick={() => setEditingId(null)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-all">
+                                      <X size={12} /> Cancel
+                                    </button>
                                   </div>
-                                  <div className="min-w-0">
-                                    <p className="text-xs md:text-sm font-mono tracking-tight truncate">
-                                      {revealedIds.has(key.id) ? key.key_value : maskKey(key.key_value)}
-                                    </p>
-                                    <div className="flex items-center gap-3 mt-0.5">
-                                      <span className={`text-[10px] uppercase font-mono ${key.is_active ? 'text-green-500/60' : 'text-white/20'}`}>
-                                        {key.is_active ? 'Active' : 'Inactive'}
-                                      </span>
-                                      {key.request_count > 0 && (
-                                        <span className="text-[10px] text-white/20 font-mono">
-                                          {key.request_count} requests
-                                        </span>
+                                </div>
+                              ) : (
+                                <div className="p-4">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                                      <div className={`p-1.5 rounded-lg ${group.accentBg} ${group.color} shrink-0 mt-0.5`}>
+                                        <Key size={13} />
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                                          <StatusBadge status={(key.status ?? 'active') as KeyStatus} />
+                                          {hasMultiple && (
+                                            <span className="text-[9px] font-mono text-white/20 uppercase">
+                                              #{keyIdx + 1}
+                                            </span>
+                                          )}
+                                          {!key.is_active && (
+                                            <span className="text-[9px] font-mono text-white/20 uppercase border border-white/10 px-1.5 py-0.5 rounded-full">disabled</span>
+                                          )}
+                                        </div>
+                                        <p className="text-xs md:text-sm font-mono tracking-tight truncate text-white/70">
+                                          {revealedIds.has(key.id) ? key.key_value : maskKey(key.key_value)}
+                                        </p>
+                                        <div className="flex items-center gap-4 mt-2 flex-wrap">
+                                          <div className="flex items-center gap-1.5 text-[10px] text-white/30">
+                                            <Activity size={10} />
+                                            <span>{key.request_count.toLocaleString()} reqs</span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 text-[10px] text-white/30">
+                                            <TrendingUp size={10} />
+                                            <span>{successRate(key)} success</span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 text-[10px] text-white/30">
+                                            <Clock size={10} />
+                                            <span>{timeAgo(key.last_used_at)}</span>
+                                          </div>
+                                          {key.error_count > 0 && (
+                                            <span className="text-[10px] text-red-400/60">{key.error_count} errors</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button onClick={() => toggleReveal(key.id)} className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all" title={revealedIds.has(key.id) ? 'Hide' : 'Reveal'}>
+                                        {revealedIds.has(key.id) ? <EyeOff size={13} /> : <Eye size={13} />}
+                                      </button>
+                                      <button onClick={() => startEdit(key)} className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all" title="Edit">
+                                        <Key size={13} />
+                                      </button>
+                                      {(key.status === 'rate_limited' || key.status === 'failed') && (
+                                        <button
+                                          onClick={() => handleReset(key.id)}
+                                          disabled={resettingId === key.id}
+                                          className="p-1.5 rounded-lg hover:bg-green-500/10 text-white/30 hover:text-green-400 transition-all disabled:opacity-50"
+                                          title="Reset status to active"
+                                        >
+                                          {resettingId === key.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                                        </button>
                                       )}
+                                      <button
+                                        onClick={() => handleToggle(key)}
+                                        className={`p-1.5 rounded-lg transition-all ${key.is_active ? 'hover:bg-yellow-500/10 text-yellow-500/40 hover:text-yellow-400' : 'hover:bg-green-500/10 text-green-500/40 hover:text-green-400'}`}
+                                        title={key.is_active ? 'Deactivate' : 'Activate'}
+                                      >
+                                        {key.is_active ? <X size={13} /> : <Check size={13} />}
+                                      </button>
+                                      <button
+                                        onClick={() => handleDelete(key.id)}
+                                        disabled={deletingId === key.id}
+                                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all disabled:opacity-50"
+                                        title="Delete"
+                                      >
+                                        {deletingId === key.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <button
-                                    onClick={() => toggleReveal(key.id)}
-                                    className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
-                                    title={revealedIds.has(key.id) ? 'Hide' : 'Reveal'}
-                                  >
-                                    {revealedIds.has(key.id) ? <EyeOff size={14} /> : <Eye size={14} />}
-                                  </button>
-                                  <button
-                                    onClick={() => startEdit(key)}
-                                    className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
-                                    title="Edit"
-                                  >
-                                    <Key size={14} />
-                                  </button>
-                                  <button
-                                    onClick={() => handleToggle(key)}
-                                    className={`p-1.5 rounded-lg transition-all ${key.is_active ? 'hover:bg-yellow-500/10 text-yellow-500/50 hover:text-yellow-400' : 'hover:bg-green-500/10 text-green-500/50 hover:text-green-400'}`}
-                                    title={key.is_active ? 'Deactivate' : 'Activate'}
-                                  >
-                                    {key.is_active ? <X size={14} /> : <Check size={14} />}
-                                  </button>
-                                  <button
-                                    onClick={() => handleDelete(key.id)}
-                                    disabled={deletingId === key.id}
-                                    className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all disabled:opacity-50"
-                                    title="Delete"
-                                  >
-                                    {deletingId === key.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))
+                              )}
+                            </motion.div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   );

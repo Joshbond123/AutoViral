@@ -204,3 +204,29 @@ export async function deleteApiKey(id: string): Promise<void> {
     .eq('id', id);
   if (error) throw new Error(error.message);
 }
+
+export async function resetKeyStatus(id: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase
+    .from('api_keys')
+    .update({ status: 'active', error_count: 0 })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export function subscribeToApiKeys(
+  callback: (payload: { eventType: string; key: ApiKey }) => void
+): (() => void) {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel('api_keys_realtime')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'api_keys' },
+      (payload) => {
+        callback({ eventType: payload.eventType, key: (payload.new ?? payload.old) as ApiKey });
+      }
+    )
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}

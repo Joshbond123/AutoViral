@@ -10,13 +10,16 @@ export interface Profile {
 export interface Post {
   id: string;
   user_id: string;
-  thumbnail_url: string;
-  title: string;
-  topic: string;
-  niche: string;
-  status: 'pending' | 'processing' | 'published' | 'failed';
+  schedule_id?: string;
+  thumbnail_url?: string;
+  title?: string;
+  topic?: string;
+  niche?: string;
+  script?: string;
+  status: 'pending' | 'processing' | 'rendered' | 'published' | 'failed';
   published_at?: string;
-  duration: string;
+  duration?: string;
+  video_url?: string;
   publish_result?: string;
 }
 
@@ -26,7 +29,13 @@ export interface Schedule {
   scheduled_time: string;
   niche: string;
   status: 'pending' | 'running' | 'success' | 'failed';
+  error_message?: string;
   created_at?: string;
+  last_run_at?: string;
+  last_run_status?: string;
+  last_topic?: string;
+  last_error?: string;
+  execution_time_ms?: number;
 }
 
 export interface ApiKey {

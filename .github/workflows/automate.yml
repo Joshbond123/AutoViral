@@ -10,7 +10,7 @@ on:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
       - name: Checkout code
@@ -23,16 +23,21 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
-      - name: Install tsx (TypeScript runner)
+      - name: Install tsx globally
         run: npm install -g tsx
 
-      - name: Install FFmpeg and fonts
+      - name: Install Chromium system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-liberation fonts-freefont-ttf fontconfig
-          fc-cache -f -v
+          sudo apt-get install -y \
+            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+            libpango-1.0-0 libcairo2 libasound2t64 \
+            fonts-liberation fonts-dejavu fontconfig
+          fc-cache -f
 
       - name: Run AutoViral Pipeline
         env:

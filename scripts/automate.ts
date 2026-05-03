@@ -1,8 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'fs';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -24,40 +28,72 @@ const NICHES = [
   'Crypto Romance Scam',
 ];
 
-// ─── API Key Helpers ──────────────────────────────────────────────────────────
+// ─── Key Rotation System ───────────────────────────────────────────────────────
 
-async function getKey(service: string): Promise<string | null> {
-  const { data } = await supabase
-    .from('api_keys')
-    .select('key_value, id')
-    .eq('service', service)
-    .eq('is_active', true)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .single();
-  return data?.key_value ?? null;
+interface KeyRecord {
+  id: string;
+  key_value: string;
+  request_count: number;
+  success_count: number;
+  error_count: number;
 }
 
-async function incrementKeyUsage(service: string, success: boolean): Promise<void> {
-  const { data } = await supabase
+async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>): Promise<T> {
+  const { data: keys } = await supabase
     .from('api_keys')
-    .select('id, request_count, success_count, error_count')
+    .select('id, key_value, request_count, success_count, error_count, status')
     .eq('service', service)
     .eq('is_active', true)
-    .limit(1)
-    .single();
-  if (!data) return;
-  await supabase.from('api_keys').update({
-    request_count: data.request_count + 1,
-    success_count: success ? data.success_count + 1 : data.success_count,
-    error_count: success ? data.error_count : data.error_count + 1,
-    last_used_at: new Date().toISOString(),
-  }).eq('id', data.id);
+    .neq('status', 'failed')
+    .order('request_count', { ascending: true })
+    .order('last_used_at', { ascending: true, nullsFirst: true });
+
+  const pool: KeyRecord[] = keys ?? [];
+  if (pool.length === 0) throw new Error(`No available API keys for service: ${service}`);
+
+  // Try active keys first, then rate_limited as fallback
+  const sorted = [
+    ...pool.filter((k: any) => k.status !== 'rate_limited'),
+    ...pool.filter((k: any) => k.status === 'rate_limited'),
+  ];
+
+  let lastError: Error | null = null;
+
+  for (const key of sorted) {
+    try {
+      const result = await fn(key.key_value);
+      await supabase.from('api_keys').update({
+        request_count: key.request_count + 1,
+        success_count: key.success_count + 1,
+        status: 'active',
+        last_used_at: new Date().toISOString(),
+      }).eq('id', key.id);
+      return result;
+    } catch (e: any) {
+      const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded/i.test(e.message ?? '');
+      await supabase.from('api_keys').update({
+        error_count: key.error_count + 1,
+        request_count: key.request_count + 1,
+        status: isRateLimit ? 'rate_limited' : 'failed',
+        last_used_at: new Date().toISOString(),
+      }).eq('id', key.id);
+      console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] for ${service}: ${isRateLimit ? 'rate_limited' : 'failed'} — ${e.message.slice(0, 120)}`);
+      lastError = e;
+    }
+  }
+
+  throw lastError ?? new Error(`All keys for ${service} exhausted`);
 }
 
 // ─── TopicShield™ ─────────────────────────────────────────────────────────────
 
-async function pickUniqueTopic(niche: string, cerebrasKey: string): Promise<string> {
+interface ScriptResult {
+  title: string;
+  script: string;
+  scenes: string[];
+}
+
+async function pickUniqueTopic(niche: string): Promise<string> {
   const { data: history } = await supabase
     .from('topic_history')
     .select('topic_title')
@@ -73,32 +109,26 @@ The title should be dramatic, specific, and educational (warning people about sc
 AVOID these already-used topics: ${used.slice(0, 40).join(' | ')}
 Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 
-  const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cerebrasKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'llama-4-scout-17b-16e-instruct',
-      max_tokens: 80,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  return tryWithKeys('cerebras', async (key) => {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-4-scout-17b-16e-instruct',
+        max_tokens: 80,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!resp.ok) throw new Error(`Cerebras topic ${resp.status}: ${await resp.text()}`);
+    const json = await resp.json() as any;
+    const topic = (json.choices?.[0]?.message?.content ?? '').trim().replace(/^["']|["']$/g, '');
+    return topic || `${niche} Warning — ${new Date().toLocaleDateString()}`;
   });
-
-  await incrementKeyUsage('cerebras', resp.ok);
-  if (!resp.ok) throw new Error(`Cerebras topic error: ${resp.status} ${await resp.text()}`);
-  const json = await resp.json() as any;
-  const topic = (json.choices?.[0]?.message?.content ?? '').trim().replace(/^["']|["']$/g, '');
-  return topic || `${niche} - ${new Date().toLocaleDateString()}`;
 }
 
 // ─── Script Generation ────────────────────────────────────────────────────────
 
-interface ScriptResult {
-  title: string;
-  script: string;
-  scenes: string[];
-}
-
-async function generateScript(topic: string, niche: string, cerebrasKey: string): Promise<ScriptResult> {
+async function generateScript(topic: string, niche: string): Promise<ScriptResult> {
   const prompt = `Create a VIRAL TikTok script for crypto scam awareness.
 Topic: "${topic}"
 Niche: ${niche}
@@ -112,184 +142,169 @@ Rules:
 
 Return ONLY valid JSON (no markdown, no explanation):
 {
-  "title": "Eye-catching TikTok title under 90 chars",
+  "title": "Eye-catching TikTok title under 80 chars",
   "script": "Full voiceover script as single paragraph, natural speech",
   "scenes": [
-    "Scene 1 image prompt: detailed visual description for AI image gen",
-    "Scene 2 image prompt: ...",
-    "Scene 3 image prompt: ...",
-    "Scene 4 image prompt: ...",
-    "Scene 5 image prompt: ..."
+    "Scene 1: detailed visual for AI image gen, dramatic dark style",
+    "Scene 2: ...",
+    "Scene 3: ...",
+    "Scene 4: ...",
+    "Scene 5: ..."
   ]
 }`;
 
-  const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cerebrasKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'llama-4-scout-17b-16e-instruct',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  return tryWithKeys('cerebras', async (key) => {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-4-scout-17b-16e-instruct',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!resp.ok) throw new Error(`Cerebras script ${resp.status}: ${await resp.text()}`);
+    const json = await resp.json() as any;
+    const content = (json.choices?.[0]?.message?.content ?? '').trim();
+
+    try {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        return {
+          title: (parsed.title || topic).slice(0, 150),
+          script: parsed.script || content,
+          scenes: Array.isArray(parsed.scenes) && parsed.scenes.length > 0
+            ? parsed.scenes.slice(0, 5)
+            : [`${topic} dramatic warning visual, dark background, cinematic 9:16`],
+        };
+      }
+    } catch { /* fall through */ }
+
+    return {
+      title: topic.slice(0, 150),
+      script: content,
+      scenes: [`${topic} crypto scam warning, dark dramatic visuals, news-style`],
+    };
   });
-
-  await incrementKeyUsage('cerebras', resp.ok);
-  if (!resp.ok) throw new Error(`Cerebras script error: ${resp.status} ${await resp.text()}`);
-  const json = await resp.json() as any;
-  const content = (json.choices?.[0]?.message?.content ?? '').trim();
-
-  try {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      return {
-        title: (parsed.title || topic).slice(0, 150),
-        script: parsed.script || content,
-        scenes: Array.isArray(parsed.scenes) && parsed.scenes.length > 0
-          ? parsed.scenes.slice(0, 5)
-          : [`${topic} crypto scam dramatic warning visual, dark background, news graphic style, 9:16 vertical`],
-      };
-    }
-  } catch { /* fall through */ }
-
-  return {
-    title: topic.slice(0, 150),
-    script: content,
-    scenes: [`${topic} crypto scam warning, dramatic dark visuals, red warning colors, 9:16 vertical format`],
-  };
 }
 
 // ─── Voiceover ────────────────────────────────────────────────────────────────
 
-async function generateVoiceover(script: string, unrealKey: string): Promise<Buffer> {
+async function generateVoiceover(script: string): Promise<Buffer> {
   const cleanScript = script.replace(/[*_~`#\[\]]/g, '').slice(0, 3000);
-  const resp = await fetch('https://api.v6.unrealspeech.com/speech', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${unrealKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      Text: cleanScript,
-      VoiceId: 'Scarlett',
-      Bitrate: '192k',
-      Speed: '0',
-      Pitch: '1.0',
-      Codec: 'libmp3lame',
-      Temperature: '0.25',
-    }),
+  return tryWithKeys('unrealspeech', async (key) => {
+    const resp = await fetch('https://api.v6.unrealspeech.com/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Text: cleanScript,
+        VoiceId: 'Scarlett',
+        Bitrate: '192k',
+        Speed: '0',
+        Pitch: '1.0',
+        Codec: 'libmp3lame',
+        Temperature: '0.25',
+      }),
+    });
+    if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
+    return Buffer.from(await resp.arrayBuffer());
   });
-
-  await incrementKeyUsage('unrealspeech', resp.ok);
-  if (!resp.ok) throw new Error(`UnrealSpeech error: ${resp.status} ${await resp.text()}`);
-  const buf = await resp.arrayBuffer();
-  return Buffer.from(buf);
 }
 
 // ─── Image Generation ─────────────────────────────────────────────────────────
 
-async function generateImage(sceneDesc: string, cfAccountId: string, cfToken: string, index: number): Promise<Buffer> {
-  const model = '@cf/black-forest-labs/flux-1-schnell';
-  const prompt = `${sceneDesc}. Vertical 9:16 format, cinematic, dark dramatic atmosphere, professional news-style graphic, no text overlays, high quality.`;
+async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
+  const prompt = `${sceneDesc}. Vertical 9:16 format, cinematic, dark dramatic atmosphere, professional, no text.`;
+  return tryWithKeys('cloudflare', async (cfToken) => {
+    const { data: idKeys } = await supabase
+      .from('api_keys')
+      .select('key_value')
+      .eq('service', 'cloudflare_id')
+      .eq('is_active', true)
+      .limit(1)
+      .single();
+    const cfAccountId = idKeys?.key_value;
+    if (!cfAccountId) throw new Error('No Cloudflare Account ID configured');
 
-  const resp = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${model}`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, num_steps: 4 }),
-    }
-  );
+    const resp = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, num_steps: 4 }),
+      }
+    );
+    if (!resp.ok) throw new Error(`Cloudflare image (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
 
-  await incrementKeyUsage('cloudflare', resp.ok);
-  if (!resp.ok) throw new Error(`Cloudflare image error (scene ${index + 1}): ${resp.status} ${await resp.text()}`);
+    const ct = resp.headers.get('content-type') ?? '';
+    if (ct.includes('image/')) return Buffer.from(await resp.arrayBuffer());
 
-  const contentType = resp.headers.get('content-type') ?? '';
-  if (contentType.includes('image/')) {
-    return Buffer.from(await resp.arrayBuffer());
-  }
-
-  const json = await resp.json() as any;
-  if (json?.result?.image) {
-    return Buffer.from(json.result.image, 'base64');
-  }
-
-  throw new Error(`Unexpected Cloudflare response format for scene ${index + 1}`);
+    const json = await resp.json() as any;
+    if (json?.result?.image) return Buffer.from(json.result.image, 'base64');
+    throw new Error(`Unexpected Cloudflare response for scene ${index + 1}`);
+  });
 }
 
-// ─── Video Assembly ───────────────────────────────────────────────────────────
+// ─── Remotion Video Assembly ───────────────────────────────────────────────────
 
-function assembleVideo(imagePaths: string[], audioPath: string, outputPath: string, script: string): void {
-  const audioDuration = (() => {
-    try {
-      const out = execSync(
-        `ffprobe -i "${audioPath}" -show_entries format=duration -v quiet -of csv=p=0`,
-        { encoding: 'utf8' }
-      ).trim();
-      return Math.max(parseFloat(out) || 45, 10);
-    } catch { return 45; }
-  })();
+async function assembleVideoWithRemotion(
+  imagePaths: string[],
+  audioPath: string,
+  outputPath: string,
+  script: string,
+  title: string,
+): Promise<void> {
+  const { bundle } = await import('@remotion/bundler') as any;
+  const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
 
-  console.log(`  Audio duration: ${audioDuration.toFixed(1)}s`);
-  const segDuration = audioDuration / imagePaths.length;
+  console.log('  Converting assets to data URLs...');
+  const scenes = imagePaths.map(p => {
+    const data = readFileSync(p).toString('base64');
+    return `data:image/jpeg;base64,${data}`;
+  });
 
-  // Concat file for images
-  const concatContent = imagePaths
-    .map((p, i) => `file '${p}'\nduration ${i < imagePaths.length - 1 ? segDuration : segDuration + 0.1}`)
-    .join('\n') + `\nfile '${imagePaths[imagePaths.length - 1]}'`;
-  const concatPath = join(tmpdir(), 'av_concat.txt');
-  writeFileSync(concatPath, concatContent);
+  const audioData = readFileSync(audioPath).toString('base64');
+  const audioSrc = `data:audio/mpeg;base64,${audioData}`;
 
-  // SRT subtitles — split script into chunks
-  const words = script.replace(/\s+/g, ' ').trim().split(' ');
-  const numChunks = Math.min(Math.floor(audioDuration / 4), 20);
-  const chunkSize = Math.ceil(words.length / Math.max(numChunks, 1));
-  const srtLines: string[] = [];
-  const fmtTime = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = Math.floor(s % 60);
-    const ms = Math.round((s % 1) * 1000);
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
-  };
+  // Estimate duration from MP3 file size (192kbps encoding)
+  const audioBytes = readFileSync(audioPath).byteLength;
+  const estimatedSeconds = Math.max((audioBytes * 8) / (192 * 1000), 20);
+  const durationInFrames = Math.ceil(estimatedSeconds * 30);
+  console.log(`  Estimated duration: ${estimatedSeconds.toFixed(1)}s → ${durationInFrames} frames`);
 
-  for (let i = 0; i < numChunks; i++) {
-    const chunk = words.slice(i * chunkSize, (i + 1) * chunkSize).join(' ');
-    if (!chunk) break;
-    const tStart = (audioDuration / numChunks) * i;
-    const tEnd = (audioDuration / numChunks) * (i + 1);
-    srtLines.push(`${i + 1}\n${fmtTime(tStart)} --> ${fmtTime(tEnd)}\n${chunk}`);
-  }
-  const srtPath = join(tmpdir(), 'av_subtitles.srt');
-  writeFileSync(srtPath, srtLines.join('\n\n'));
+  const inputProps = { scenes, audioSrc, script, title, durationInFrames };
 
-  // FFmpeg command — 9:16 video with subtitles
-  const fontFile = existsSync('/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf')
-    ? '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf'
-    : 'LiberationSans-Bold';
+  console.log('  Bundling Remotion composition...');
+  const entryPoint = join(__dirname, 'remotion', 'root.tsx');
+  const bundleLocation = await bundle({ entryPoint, webpackOverride: (cfg: any) => cfg });
 
-  const filterComplex = [
-    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,`,
-    `crop=1080:1920,setsar=1,fps=30[vscaled];`,
-    `[vscaled]subtitles=${srtPath}:force_style=`,
-    `'FontName=${fontFile},FontSize=48,Bold=1,`,
-    `PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,`,
-    `BackColour=&H80000000,Outline=2,Shadow=1,`,
-    `Alignment=2,MarginV=120,WrapStyle=0'[vout]`,
-  ].join('');
+  console.log('  Launching Chromium...');
+  await ensureBrowser();
 
-  const cmd = [
-    'ffmpeg -y -loglevel warning',
-    `-f concat -safe 0 -i "${concatPath}"`,
-    `-i "${audioPath}"`,
-    `-filter_complex "${filterComplex}"`,
-    `-map "[vout]" -map 1:a`,
-    `-c:v libx264 -preset fast -crf 23 -profile:v high`,
-    `-c:a aac -b:a 192k`,
-    `-shortest -movflags +faststart`,
-    `-t ${audioDuration + 0.5}`,
-    `"${outputPath}"`,
-  ].join(' ');
+  console.log('  Selecting composition...');
+  const composition = await selectComposition({
+    serveUrl: bundleLocation,
+    id: 'TikTokVideo',
+    inputProps,
+  });
 
-  console.log('  Running FFmpeg...');
-  execSync(cmd, { stdio: 'inherit' });
+  console.log(`  Rendering ${durationInFrames} frames at 1080×1920...`);
+  await renderMedia({
+    composition,
+    serveUrl: bundleLocation,
+    codec: 'h264',
+    outputLocation: outputPath,
+    inputProps,
+    timeoutInMilliseconds: 15 * 60 * 1000,
+    chromiumOptions: { disableWebSecurity: true },
+    onProgress: ({ renderedFrames, totalFrames }: any) => {
+      if (renderedFrames % 150 === 0 || renderedFrames === totalFrames) {
+        const pct = ((renderedFrames / totalFrames) * 100).toFixed(0);
+        console.log(`    ↳ ${renderedFrames}/${totalFrames} frames (${pct}%)`);
+      }
+    },
+  });
 }
 
 // ─── Storage Upload ───────────────────────────────────────────────────────────
@@ -348,12 +363,16 @@ async function publishToTikTok(videoPath: string, accessToken: string): Promise<
 
 // ─── Main Pipeline ────────────────────────────────────────────────────────────
 
-async function runPipeline(schedule: any, keys: { cerebras: string; cloudflare: string; cloudflare_id: string; unrealspeech: string }): Promise<void> {
+async function runPipeline(schedule: any): Promise<void> {
   const startTime = Date.now();
-  const tmpDir = join(tmpdir(), `autoviral_${schedule.id.slice(0, 8)}`);
+  const tmpDir = join(tmpdir(), `autoviral_${schedule.id.slice(0, 8)}_${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
 
-  console.log(`\n▶ Schedule ${schedule.id.slice(0, 8)} | niche: ${schedule.niche}`);
+  const niche = schedule.niche === 'AUTO'
+    ? NICHES[Math.floor(Math.random() * NICHES.length)]
+    : schedule.niche;
+
+  console.log(`\n▶ Schedule ${schedule.id.slice(0, 8)} | niche: ${niche}`);
 
   await supabase.from('schedules').update({
     status: 'running',
@@ -363,9 +382,7 @@ async function runPipeline(schedule: any, keys: { cerebras: string; cloudflare: 
   const { data: postRow } = await supabase.from('posts').insert({
     user_id: schedule.user_id,
     schedule_id: schedule.id,
-    niche: schedule.niche === 'AUTO'
-      ? NICHES[Math.floor(Math.random() * NICHES.length)]
-      : schedule.niche,
+    niche,
     status: 'processing',
   }).select().single();
 
@@ -383,71 +400,65 @@ async function runPipeline(schedule: any, keys: { cerebras: string; cloudflare: 
       last_error: msg.slice(0, 500),
       execution_time_ms: elapsed,
       error_message: msg.slice(0, 500),
-      scheduled_time: new Date(new Date(schedule.scheduled_time).getTime() + 86400000).toISOString(),
+      scheduled_time: new Date(Date.now() + 86400000).toISOString(),
     }).eq('id', schedule.id);
   };
 
   try {
-    const niche = schedule.niche === 'AUTO'
-      ? NICHES[Math.floor(Math.random() * NICHES.length)]
-      : schedule.niche;
-
-    // 1. Topic research (TopicShield)
+    // 1. TopicShield
     console.log('  1/7 Researching unique topic...');
-    const topic = await pickUniqueTopic(niche, keys.cerebras);
+    const topic = await pickUniqueTopic(niche);
     console.log(`     → "${topic}"`);
 
     await supabase.from('topic_history').upsert({
       niche,
       topic_title: topic,
       topic_hash: Buffer.from(topic.toLowerCase().replace(/\s+/g, '_')).toString('base64').slice(0, 64),
-    }).then(() => {}).catch(() => {});
+    }).catch(() => {});
 
     if (postId) await supabase.from('posts').update({ topic, niche }).eq('id', postId);
 
     // 2. Script generation
     console.log('  2/7 Generating viral script...');
-    const { title, script, scenes } = await generateScript(topic, niche, keys.cerebras);
+    const { title, script, scenes } = await generateScript(topic, niche);
     console.log(`     → "${title}"`);
-
     if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
 
     // 3. Voiceover
-    console.log('  3/7 Generating voiceover...');
-    const audioBuffer = await generateVoiceover(script, keys.unrealspeech);
+    console.log('  3/7 Generating voiceover (UnrealSpeech)...');
+    const audioBuffer = await generateVoiceover(script);
     const audioPath = join(tmpDir, 'voice.mp3');
     writeFileSync(audioPath, audioBuffer);
     console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB`);
 
     // 4. Scene images
-    console.log('  4/7 Generating scene images...');
+    console.log('  4/7 Generating scene images (Cloudflare AI)...');
     const imagePaths: string[] = [];
     for (let i = 0; i < scenes.length; i++) {
       try {
-        const imgBuf = await generateImage(scenes[i], keys.cloudflare_id, keys.cloudflare, i);
+        const imgBuf = await generateImage(scenes[i], i);
         const imgPath = join(tmpDir, `scene_${i}.jpg`);
         writeFileSync(imgPath, imgBuf);
         imagePaths.push(imgPath);
         console.log(`     → Scene ${i + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB`);
       } catch (e: any) {
-        console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message} — using placeholder`);
-        // Create a fallback solid color placeholder using ImageMagick if available
+        console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message}`);
+        // Solid color fallback via Node.js
+        const placeholderPath = join(tmpDir, `scene_${i}.jpg`);
         try {
-          const placeholderPath = join(tmpDir, `scene_${i}.jpg`);
-          execSync(`convert -size 1080x1920 xc:#1a1a2e "${placeholderPath}" 2>/dev/null || ffmpeg -y -f lavfi -i color=c=0x1a1a2e:size=1080x1920:rate=1 -frames:v 1 "${placeholderPath}"`);
-          imagePaths.push(placeholderPath);
-        } catch { /* ignore */ }
+          execSync(`convert -size 1080x1920 xc:#0a0a1e "${placeholderPath}" 2>/dev/null || true`);
+          if (require('fs').existsSync(placeholderPath)) imagePaths.push(placeholderPath);
+        } catch { /* skip */ }
       }
     }
-
     if (imagePaths.length === 0) throw new Error('All scene images failed to generate');
 
-    // 5. Assemble video
-    console.log('  5/7 Assembling video with FFmpeg...');
+    // 5. Remotion video render
+    console.log('  5/7 Rendering professional video with Remotion...');
     const videoPath = join(tmpDir, 'final.mp4');
-    assembleVideo(imagePaths, audioPath, videoPath, script);
-    const videoStat = readFileSync(videoPath);
-    console.log(`     → ${(videoStat.byteLength / (1024 * 1024)).toFixed(1)} MB`);
+    await assembleVideoWithRemotion(imagePaths, audioPath, videoPath, script, title);
+    const videoSize = readFileSync(videoPath).byteLength;
+    console.log(`     → ${(videoSize / (1024 * 1024)).toFixed(1)} MB`);
 
     // 6. Upload to Supabase Storage
     console.log('  6/7 Uploading to Supabase Storage...');
@@ -485,8 +496,8 @@ async function runPipeline(schedule: any, keys: { cerebras: string; cloudflare: 
         console.warn(`     ⚠ TikTok publish failed: ${e.message}`);
       }
     } else {
-      publishError = 'No TikTok access token — video saved to storage';
-      console.log(`     ⚠ No access token, video stored at: ${videoUrl}`);
+      publishError = 'No TikTok access token found';
+      console.warn('     ⚠ No TikTok access token — video saved to storage only');
     }
 
     const elapsed = Date.now() - startTime;
@@ -506,11 +517,10 @@ async function runPipeline(schedule: any, keys: { cerebras: string; cloudflare: 
       last_topic: topic,
       last_error: publishError,
       execution_time_ms: elapsed,
-      // Advance to same time tomorrow
-      scheduled_time: new Date(new Date(schedule.scheduled_time).getTime() + 86400000).toISOString(),
+      scheduled_time: new Date(Date.now() + 86400000).toISOString(),
     }).eq('id', schedule.id);
 
-    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — status: ${publishId ? 'published' : 'rendered'}`);
+    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — ${publishId ? `published: ${publishId}` : 'stored: ' + videoUrl}`);
 
   } catch (err: any) {
     await failSchedule(err.message ?? String(err));
@@ -522,28 +532,23 @@ async function runPipeline(schedule: any, keys: { cerebras: string; cloudflare: 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log('🚀 AutoViral Pipeline — ' + new Date().toISOString());
+  console.log('🚀 AutoViral Pipeline (Remotion) — ' + new Date().toISOString());
 
-  const [cerebras, cloudflare, cloudflare_id, unrealspeech] = await Promise.all([
-    getKey('cerebras'),
-    getKey('cloudflare'),
-    getKey('cloudflare_id'),
-    getKey('unrealspeech'),
-  ]);
+  const { data: activeKeys } = await supabase
+    .from('api_keys')
+    .select('service')
+    .eq('is_active', true)
+    .neq('status', 'failed');
 
-  const missing: string[] = [];
-  if (!cerebras) missing.push('cerebras');
-  if (!cloudflare) missing.push('cloudflare (API token)');
-  if (!cloudflare_id) missing.push('cloudflare_id (Account ID)');
-  if (!unrealspeech) missing.push('unrealspeech');
+  const servicesPresent = new Set((activeKeys ?? []).map((k: any) => k.service));
+  const required = ['cerebras', 'cloudflare', 'cloudflare_id', 'unrealspeech'];
+  const missing = required.filter(s => !servicesPresent.has(s));
 
   if (missing.length > 0) {
     console.error(`❌ Missing API keys in Supabase: ${missing.join(', ')}`);
     console.error('   → Add them via the Settings page in the AutoViral dashboard.');
     process.exit(1);
   }
-
-  const keys = { cerebras: cerebras!, cloudflare: cloudflare!, cloudflare_id: cloudflare_id!, unrealspeech: unrealspeech! };
 
   const { data: schedules, error } = await supabase
     .from('schedules')
@@ -563,7 +568,7 @@ async function main(): Promise<void> {
 
   console.log(`Found ${schedules.length} schedule(s) to run.`);
   for (const schedule of schedules) {
-    await runPipeline(schedule, keys);
+    await runPipeline(schedule);
   }
 
   console.log('\n✅ All pipelines complete!');

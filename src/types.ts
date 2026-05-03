@@ -43,6 +43,7 @@ export interface ApiKey {
   service: 'cerebras' | 'cloudflare' | 'cloudflare_id' | 'unrealspeech';
   key_value: string;
   is_active: boolean;
+  status: 'active' | 'rate_limited' | 'failed';
   request_count: number;
   success_count: number;
   error_count: number;

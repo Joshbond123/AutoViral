@@ -219,7 +219,9 @@ async function generateVoiceover(script: string): Promise<Buffer> {
       }),
     });
     if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
-    return Buffer.from(await resp.arrayBuffer());
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.byteLength < 1000) throw new Error(`UnrealSpeech returned empty audio (${buf.byteLength} bytes)`);
+    return buf;
   });
 }
 
@@ -275,12 +277,15 @@ async function assembleVideoWithRemotion(
     return `data:image/jpeg;base64,${data}`;
   });
 
-  const audioData = readFileSync(audioPath).toString('base64');
-  const audioSrc = `data:audio/mpeg;base64,${audioData}`;
-
-  // Estimate duration from MP3 file size (192kbps encoding)
   const audioBytes = readFileSync(audioPath).byteLength;
-  const estimatedSeconds = Math.max((audioBytes * 8) / (192 * 1000), 20);
+  const hasAudio = audioBytes > 1000;
+  const audioSrc = hasAudio
+    ? `data:audio/mpeg;base64,${readFileSync(audioPath).toString('base64')}`
+    : '';
+  if (!hasAudio) console.warn('  ⚠ Audio file empty — rendering without voiceover');
+
+  // Estimate duration from MP3 file size (192kbps encoding); fallback 30s
+  const estimatedSeconds = hasAudio ? Math.max((audioBytes * 8) / (192 * 1000), 20) : 30;
   const durationInFrames = Math.ceil(estimatedSeconds * 30);
   console.log(`  Estimated duration: ${estimatedSeconds.toFixed(1)}s → ${durationInFrames} frames`);
 

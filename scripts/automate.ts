@@ -219,6 +219,21 @@ async function generateVoiceover(script: string): Promise<Buffer> {
       }),
     });
     if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
+
+    // UnrealSpeech v6 returns JSON with OutputUri pointing to S3 audio
+    const ct = resp.headers.get('content-type') ?? '';
+    if (ct.includes('application/json')) {
+      const json = await resp.json() as any;
+      if (!json.OutputUri) throw new Error(`UnrealSpeech: no OutputUri in response — ${JSON.stringify(json)}`);
+      console.log(`     → Downloading audio from S3...`);
+      const audioResp = await fetch(json.OutputUri);
+      if (!audioResp.ok) throw new Error(`S3 audio download failed: ${audioResp.status}`);
+      const buf = Buffer.from(await audioResp.arrayBuffer());
+      if (buf.byteLength < 1000) throw new Error(`UnrealSpeech S3 audio empty (${buf.byteLength} bytes)`);
+      return buf;
+    }
+
+    // Direct audio response (older API versions)
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.byteLength < 1000) throw new Error(`UnrealSpeech returned empty audio (${buf.byteLength} bytes)`);
     return buf;

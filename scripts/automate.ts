@@ -410,11 +410,13 @@ async function runPipeline(schedule: any): Promise<void> {
     const topic = await pickUniqueTopic(niche);
     console.log(`     → "${topic}"`);
 
-    await supabase.from('topic_history').upsert({
-      niche,
-      topic_title: topic,
-      topic_hash: Buffer.from(topic.toLowerCase().replace(/\s+/g, '_')).toString('base64').slice(0, 64),
-    }).catch(() => {});
+    try {
+      await supabase.from('topic_history').upsert({
+        niche,
+        topic_title: topic,
+        topic_hash: Buffer.from(topic.toLowerCase().replace(/\s+/g, '_')).toString('base64').slice(0, 64),
+      });
+    } catch { /* non-critical */ }
 
     if (postId) await supabase.from('posts').update({ topic, niche }).eq('id', postId);
 

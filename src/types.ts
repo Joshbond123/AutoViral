@@ -31,7 +31,7 @@ export interface Schedule {
 
 export interface ApiKey {
   id: string;
-  service: 'cerebras' | 'cloudflare' | 'unrealspeech';
+  service: 'cerebras' | 'cloudflare' | 'cloudflare_id' | 'unrealspeech';
   key_value: string;
   is_active: boolean;
   request_count: number;

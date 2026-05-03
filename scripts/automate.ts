@@ -28,6 +28,19 @@ const NICHES = [
   'Crypto Romance Scam',
 ];
 
+// ─── Curated Royalty-Free Background Music ─────────────────────────────────
+// All tracks are royalty-free and suitable for social media content
+const BACKGROUND_MUSIC_TRACKS = [
+  'https://assets.mixkit.co/music/preview/mixkit-dramatic-mystery-trailer-599.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-news-big-moment-574.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-adventure-awaits-471.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-epic-orchestra-736.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-dark-suspense-tension-583.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-cinematic-tension-pulsing-521.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-inspiring-cinematic-documentary-120.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-deep-urban-623.mp3',
+];
+
 // ─── Key Rotation System ───────────────────────────────────────────────────────
 
 interface KeyRecord {
@@ -51,7 +64,6 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
   const pool: KeyRecord[] = keys ?? [];
   if (pool.length === 0) throw new Error(`No available API keys for service: ${service}`);
 
-  // Active keys first, rate_limited as fallback
   const sorted = [
     ...pool.filter((k: any) => k.status !== 'rate_limited'),
     ...pool.filter((k: any) => k.status === 'rate_limited'),
@@ -60,7 +72,6 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
   let lastError: Error | null = null;
 
   for (const key of sorted) {
-    // Allow up to 3 attempts per key with exponential backoff on rate limits
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -75,7 +86,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
       } catch (e: any) {
         const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic/i.test(e.message ?? '');
         if (isRateLimit && attempt < maxAttempts) {
-          const delay = attempt * 4000; // 4s, 8s
+          const delay = attempt * 4000;
           console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
           await new Promise(res => setTimeout(res, delay));
           continue;
@@ -151,16 +162,18 @@ Rules:
 - End with: "Follow for daily crypto scam warnings!"
 - Do NOT use emojis in the voiceover script
 
+CRITICAL: You MUST generate exactly 5 unique scene descriptions. Each scene MUST be a pure VISUAL description only — NO TEXT, NO WORDS, NO LETTERS, NO NUMBERS, NO CAPTIONS in any scene. Describe ONLY what is visually happening (people, objects, environments, emotions, colors, lighting).
+
 Return ONLY valid JSON (no markdown, no explanation):
 {
   "title": "Eye-catching TikTok title under 80 chars",
-  "script": "Full voiceover script as single paragraph, natural speech",
+  "script": "Full voiceover script as single paragraph, natural speech, 45-55 seconds when read aloud",
   "scenes": [
-    "Scene 1: detailed visual for AI image gen, dramatic dark style",
-    "Scene 2: ...",
-    "Scene 3: ...",
-    "Scene 4: ...",
-    "Scene 5: ..."
+    "Scene 1: [pure visual description — e.g. A shadowy figure in a dark hoodie sitting behind multiple monitors in a dim room, blue light casting harsh shadows, cinematic 9:16 vertical]",
+    "Scene 2: [pure visual description]",
+    "Scene 3: [pure visual description]",
+    "Scene 4: [pure visual description]",
+    "Scene 5: [pure visual description]"
   ]
 }`;
 
@@ -170,7 +183,7 @@ Return ONLY valid JSON (no markdown, no explanation):
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'llama3.1-8b',
-        max_tokens: 1500,
+        max_tokens: 1800,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -182,12 +195,25 @@ Return ONLY valid JSON (no markdown, no explanation):
       const match = content.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
+        const rawScenes: string[] = Array.isArray(parsed.scenes) ? parsed.scenes : [];
+
+        // Ensure we always have exactly 5 scenes
+        const defaultScenes = [
+          `${topic} — shadowy hacker figure at multiple monitors, dark dramatic lighting, cinematic vertical`,
+          `${topic} — crashing red stock charts on screen, person looking shocked, dark office environment`,
+          `${topic} — pile of Bitcoin and dollar bills vanishing, dramatic dark atmosphere, cinematic`,
+          `${topic} — anonymous hooded figure in dimly lit room, suspicious activity, blue neon lighting`,
+          `${topic} — glowing warning signs and digital lock icons, dark background, dramatic cinematic`,
+        ];
+
+        const scenes = rawScenes.length >= 5
+          ? rawScenes.slice(0, 5)
+          : [...rawScenes, ...defaultScenes.slice(rawScenes.length)];
+
         return {
           title: (parsed.title || topic).slice(0, 150),
           script: parsed.script || content,
-          scenes: Array.isArray(parsed.scenes) && parsed.scenes.length > 0
-            ? parsed.scenes.slice(0, 5)
-            : [`${topic} dramatic warning visual, dark background, cinematic 9:16`],
+          scenes,
         };
       }
     } catch { /* fall through */ }
@@ -195,7 +221,13 @@ Return ONLY valid JSON (no markdown, no explanation):
     return {
       title: topic.slice(0, 150),
       script: content,
-      scenes: [`${topic} crypto scam warning, dark dramatic visuals, news-style`],
+      scenes: [
+        `${topic} crypto scam warning — shadowy figure at computer, dark dramatic atmosphere, cinematic 9:16`,
+        `${topic} — victim looking at empty crypto wallet on screen, shocked expression, dark room`,
+        `${topic} — anonymous hacker in hoodie with multiple screens, blue neon lighting, dramatic`,
+        `${topic} — digital vault cracking open and disappearing, dark cinematic atmosphere`,
+        `${topic} — person crying while looking at phone with financial loss, dramatic dark lighting`,
+      ],
     };
   });
 }
@@ -203,7 +235,13 @@ Return ONLY valid JSON (no markdown, no explanation):
 // ─── Voiceover ────────────────────────────────────────────────────────────────
 
 async function generateVoiceover(script: string): Promise<Buffer> {
-  const cleanScript = script.replace(/[*_~`#\[\]]/g, '').slice(0, 3000);
+  // Clean script of markdown and limit length
+  const cleanScript = script
+    .replace(/[*_~`#\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 3000);
+
   return tryWithKeys('unrealspeech', async (key) => {
     const resp = await fetch('https://api.v6.unrealspeech.com/speech', {
       method: 'POST',
@@ -212,19 +250,18 @@ async function generateVoiceover(script: string): Promise<Buffer> {
         Text: cleanScript,
         VoiceId: 'Scarlett',
         Bitrate: '192k',
-        Speed: '0',
+        Speed: '-0.1',       // Slightly slower for clarity and impact
         Pitch: '1.0',
         Codec: 'libmp3lame',
-        Temperature: '0.25',
+        Temperature: '0.3',  // Slightly more expressive
       }),
     });
     if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
 
-    // UnrealSpeech v6 returns JSON with OutputUri pointing to S3 audio
     const ct = resp.headers.get('content-type') ?? '';
     if (ct.includes('application/json')) {
       const json = await resp.json() as any;
-      if (!json.OutputUri) throw new Error(`UnrealSpeech: no OutputUri in response — ${JSON.stringify(json)}`);
+      if (!json.OutputUri) throw new Error(`UnrealSpeech: no OutputUri — ${JSON.stringify(json)}`);
       console.log(`     → Downloading audio from S3...`);
       const audioResp = await fetch(json.OutputUri);
       if (!audioResp.ok) throw new Error(`S3 audio download failed: ${audioResp.status}`);
@@ -233,7 +270,6 @@ async function generateVoiceover(script: string): Promise<Buffer> {
       return buf;
     }
 
-    // Direct audio response (older API versions)
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.byteLength < 1000) throw new Error(`UnrealSpeech returned empty audio (${buf.byteLength} bytes)`);
     return buf;
@@ -243,7 +279,14 @@ async function generateVoiceover(script: string): Promise<Buffer> {
 // ─── Image Generation ─────────────────────────────────────────────────────────
 
 async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
-  const prompt = `${sceneDesc}. Vertical 9:16 format, cinematic, dark dramatic atmosphere, professional, no text.`;
+  // Critical: multiple explicit "no text" instructions to prevent text overlay in images
+  const prompt = [
+    sceneDesc,
+    'Vertical 9:16 format, cinematic, dark dramatic atmosphere, professional photography.',
+    'CRITICAL: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels anywhere in the image.',
+    'Pure photographic/cinematic visual only.',
+  ].join(' ');
+
   return tryWithKeys('cloudflare', async (cfToken) => {
     const { data: idKeys } = await supabase
       .from('api_keys')
@@ -274,11 +317,39 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
   });
 }
 
+// ─── Background Music ─────────────────────────────────────────────────────────
+
+async function downloadBackgroundMusic(tmpDir: string): Promise<string | null> {
+  const trackUrl = BACKGROUND_MUSIC_TRACKS[Math.floor(Math.random() * BACKGROUND_MUSIC_TRACKS.length)];
+  const musicPath = join(tmpDir, 'music.mp3');
+
+  try {
+    console.log(`     → Downloading background music...`);
+    const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) {
+      console.warn(`     ⚠ Music download failed (${resp.status}) — running without background music`);
+      return null;
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.byteLength < 10000) {
+      console.warn(`     ⚠ Music file too small (${buf.byteLength} bytes) — skipping`);
+      return null;
+    }
+    writeFileSync(musicPath, buf);
+    console.log(`     → Music: ${(buf.byteLength / 1024).toFixed(0)} KB`);
+    return musicPath;
+  } catch (e: any) {
+    console.warn(`     ⚠ Music download error: ${e.message} — running without background music`);
+    return null;
+  }
+}
+
 // ─── Remotion Video Assembly ───────────────────────────────────────────────────
 
 async function assembleVideoWithRemotion(
   imagePaths: string[],
   audioPath: string,
+  musicPath: string | null,
   outputPath: string,
   script: string,
   title: string,
@@ -287,10 +358,14 @@ async function assembleVideoWithRemotion(
   const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
 
   console.log('  Converting assets to data URLs...');
+
+  // Convert all scene images to base64 data URLs
   const scenes = imagePaths.map(p => {
     const data = readFileSync(p).toString('base64');
     return `data:image/jpeg;base64,${data}`;
   });
+
+  console.log(`  → ${scenes.length} scene(s) loaded`);
 
   const audioBytes = readFileSync(audioPath).byteLength;
   const hasAudio = audioBytes > 1000;
@@ -299,12 +374,24 @@ async function assembleVideoWithRemotion(
     : '';
   if (!hasAudio) console.warn('  ⚠ Audio file empty — rendering without voiceover');
 
-  // Estimate duration from MP3 file size (192kbps encoding); fallback 30s
-  const estimatedSeconds = hasAudio ? Math.max((audioBytes * 8) / (192 * 1000), 20) : 30;
+  // Convert background music to data URL
+  let musicSrc = '';
+  if (musicPath) {
+    try {
+      const musicData = readFileSync(musicPath).toString('base64');
+      musicSrc = `data:audio/mpeg;base64,${musicData}`;
+      console.log('  → Background music loaded');
+    } catch { /* skip music if it fails */ }
+  }
+
+  // Estimate duration from MP3 file size at 192kbps; minimum 25s, maximum 75s
+  const estimatedSeconds = hasAudio
+    ? Math.min(Math.max((audioBytes * 8) / (192 * 1000), 25), 75)
+    : 35;
   const durationInFrames = Math.ceil(estimatedSeconds * 30);
   console.log(`  Estimated duration: ${estimatedSeconds.toFixed(1)}s → ${durationInFrames} frames`);
 
-  const inputProps = { scenes, audioSrc, script, title, durationInFrames };
+  const inputProps = { scenes, audioSrc, musicSrc, script, title, durationInFrames };
 
   console.log('  Bundling Remotion composition...');
   const entryPoint = join(__dirname, 'remotion', 'root.tsx');
@@ -437,7 +524,7 @@ async function runPipeline(schedule: any): Promise<void> {
 
   try {
     // 1. TopicShield
-    console.log('  1/7 Researching unique topic...');
+    console.log('  1/8 Researching unique topic...');
     const topic = await pickUniqueTopic(niche);
     console.log(`     → "${topic}"`);
 
@@ -452,20 +539,24 @@ async function runPipeline(schedule: any): Promise<void> {
     if (postId) await supabase.from('posts').update({ topic, niche }).eq('id', postId);
 
     // 2. Script generation
-    console.log('  2/7 Generating viral script...');
+    console.log('  2/8 Generating viral script with 5 scenes...');
     const { title, script, scenes } = await generateScript(topic, niche);
-    console.log(`     → "${title}"`);
+    console.log(`     → "${title}" | ${scenes.length} scenes`);
     if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
 
     // 3. Voiceover
-    console.log('  3/7 Generating voiceover (UnrealSpeech)...');
+    console.log('  3/8 Generating voiceover (UnrealSpeech)...');
     const audioBuffer = await generateVoiceover(script);
     const audioPath = join(tmpDir, 'voice.mp3');
     writeFileSync(audioPath, audioBuffer);
     console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB`);
 
-    // 4. Scene images
-    console.log('  4/7 Generating scene images (Cloudflare AI)...');
+    // 4. Background music (parallel-friendly, non-critical)
+    console.log('  4/8 Downloading background music...');
+    const musicPath = await downloadBackgroundMusic(tmpDir);
+
+    // 5. Scene images — generate all 5 scenes
+    console.log(`  5/8 Generating ${scenes.length} scene images (Cloudflare AI)...`);
     const imagePaths: string[] = [];
     for (let i = 0; i < scenes.length; i++) {
       try {
@@ -473,28 +564,38 @@ async function runPipeline(schedule: any): Promise<void> {
         const imgPath = join(tmpDir, `scene_${i}.jpg`);
         writeFileSync(imgPath, imgBuf);
         imagePaths.push(imgPath);
-        console.log(`     → Scene ${i + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB`);
+        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
       } catch (e: any) {
-        console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message}`);
-        // Solid color fallback via Node.js
+        console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message} — using dark fallback`);
+        // Create a dark solid-color fallback image using ImageMagick or sharp
         const placeholderPath = join(tmpDir, `scene_${i}.jpg`);
         try {
-          execSync(`convert -size 1080x1920 xc:#0a0a1e "${placeholderPath}" 2>/dev/null || true`);
-          if (require('fs').existsSync(placeholderPath)) imagePaths.push(placeholderPath);
-        } catch { /* skip */ }
+          // Try ImageMagick
+          execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${placeholderPath}" 2>/dev/null || true`);
+          const fs = await import('fs');
+          if (fs.existsSync(placeholderPath) && fs.statSync(placeholderPath).size > 100) {
+            imagePaths.push(placeholderPath);
+          }
+        } catch { /* skip this scene */ }
       }
     }
-    if (imagePaths.length === 0) throw new Error('All scene images failed to generate');
 
-    // 5. Remotion video render
-    console.log('  5/7 Rendering professional video with Remotion...');
+    if (imagePaths.length === 0) {
+      throw new Error('All scene images failed to generate — cannot create video');
+    }
+
+    // Log how many scenes we actually got
+    console.log(`     → ${imagePaths.length} of ${scenes.length} scenes ready`);
+
+    // 6. Remotion video render
+    console.log('  6/8 Rendering professional video with Remotion...');
     const videoPath = join(tmpDir, 'final.mp4');
-    await assembleVideoWithRemotion(imagePaths, audioPath, videoPath, script, title);
+    await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title);
     const videoSize = readFileSync(videoPath).byteLength;
     console.log(`     → ${(videoSize / (1024 * 1024)).toFixed(1)} MB`);
 
-    // 6. Upload to Supabase Storage
-    console.log('  6/7 Uploading to Supabase Storage...');
+    // 7. Upload to Supabase Storage
+    console.log('  7/8 Uploading to Supabase Storage...');
     const timestamp = Date.now();
     const userId = schedule.user_id;
     const videoUrl = await uploadFile(videoPath, `videos/${userId}/${timestamp}.mp4`, 'video/mp4');
@@ -509,8 +610,8 @@ async function runPipeline(schedule: any): Promise<void> {
       }).eq('id', postId);
     }
 
-    // 7. Publish to TikTok
-    console.log('  7/7 Publishing to TikTok...');
+    // 8. Publish to TikTok
+    console.log('  8/8 Publishing to TikTok...');
     const { data: profile } = await supabase
       .from('profiles')
       .select('access_token')

@@ -5,6 +5,7 @@ import { TikTokVideo, TikTokVideoProps } from './TikTokVideo';
 const defaultProps: TikTokVideoProps = {
   scenes: [],
   audioSrc: '',
+  musicSrc: '',
   script: '',
   title: '',
   durationInFrames: 1500,

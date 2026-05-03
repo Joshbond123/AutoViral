@@ -51,7 +51,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
   const pool: KeyRecord[] = keys ?? [];
   if (pool.length === 0) throw new Error(`No available API keys for service: ${service}`);
 
-  // Try active keys first, then rate_limited as fallback
+  // Active keys first, rate_limited as fallback
   const sorted = [
     ...pool.filter((k: any) => k.status !== 'rate_limited'),
     ...pool.filter((k: any) => k.status === 'rate_limited'),
@@ -60,25 +60,36 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
   let lastError: Error | null = null;
 
   for (const key of sorted) {
-    try {
-      const result = await fn(key.key_value);
-      await supabase.from('api_keys').update({
-        request_count: key.request_count + 1,
-        success_count: key.success_count + 1,
-        status: 'active',
-        last_used_at: new Date().toISOString(),
-      }).eq('id', key.id);
-      return result;
-    } catch (e: any) {
-      const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded/i.test(e.message ?? '');
-      await supabase.from('api_keys').update({
-        error_count: key.error_count + 1,
-        request_count: key.request_count + 1,
-        status: isRateLimit ? 'rate_limited' : 'failed',
-        last_used_at: new Date().toISOString(),
-      }).eq('id', key.id);
-      console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] for ${service}: ${isRateLimit ? 'rate_limited' : 'failed'} — ${e.message.slice(0, 120)}`);
-      lastError = e;
+    // Allow up to 3 attempts per key with exponential backoff on rate limits
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const result = await fn(key.key_value);
+        await supabase.from('api_keys').update({
+          request_count: key.request_count + 1,
+          success_count: key.success_count + 1,
+          status: 'active',
+          last_used_at: new Date().toISOString(),
+        }).eq('id', key.id);
+        return result;
+      } catch (e: any) {
+        const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic/i.test(e.message ?? '');
+        if (isRateLimit && attempt < maxAttempts) {
+          const delay = attempt * 4000; // 4s, 8s
+          console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
+          await new Promise(res => setTimeout(res, delay));
+          continue;
+        }
+        await supabase.from('api_keys').update({
+          error_count: key.error_count + 1,
+          request_count: key.request_count + 1,
+          status: isRateLimit ? 'rate_limited' : 'failed',
+          last_used_at: new Date().toISOString(),
+        }).eq('id', key.id);
+        console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] [${service}]: ${isRateLimit ? 'rate_limited' : 'failed'} — ${e.message.slice(0, 120)}`);
+        lastError = e;
+        break;
+      }
     }
   }
 
@@ -114,7 +125,7 @@ Return ONLY the topic title — nothing else, no quotes, no extra text.`;
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen-3-235b-a22b-instruct-2507',
+        model: 'llama3.1-8b',
         max_tokens: 80,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -158,7 +169,7 @@ Return ONLY valid JSON (no markdown, no explanation):
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen-3-235b-a22b-instruct-2507',
+        model: 'llama3.1-8b',
         max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),

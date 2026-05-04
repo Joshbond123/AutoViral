@@ -21,13 +21,16 @@
     // Encode appUrl in state so callback knows where to redirect the browser back to.
     const stateEncoded = btoa(JSON.stringify({ s: csrfToken, app: APP_URL }));
 
+    // force_login=true ensures TikTok always shows the login/consent screen,
+    // preventing silent re-authentication with a previously cached TikTok session.
     const url =
       `https://www.tiktok.com/v2/auth/authorize/` +
       `?client_key=${TIKTOK_CLIENT_KEY}` +
       `&scope=${encodeURIComponent(scope)}` +
       `&response_type=code` +
       `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-      `&state=${encodeURIComponent(stateEncoded)}`;
+      `&state=${encodeURIComponent(stateEncoded)}` +
+      `&force_login=true`;
 
     return new Response(JSON.stringify({ url }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

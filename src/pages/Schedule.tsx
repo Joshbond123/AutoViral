@@ -83,12 +83,16 @@ export default function Schedule() {
   useEffect(() => {
     loadSchedules();
 
-    // Real-time subscription
+    // Real-time subscription — this is the ONLY place new records are added to state.
+    // The handleSubmit function intentionally does NOT manually push to state to avoid
+    // duplicates (the subscription fires for our own inserts too).
     const unsub = subscribeToSchedules(userId, (updated) => {
       setSchedules(prev => {
         const exists = prev.find(s => s.id === updated.id);
         if (exists) return prev.map(s => s.id === updated.id ? updated : s);
-        return [updated, ...prev];
+        return [...prev, updated].sort(
+          (a, b) => new Date(a.scheduled_time).getTime() - new Date(b.scheduled_time).getTime()
+        );
       });
     });
     return unsub;
@@ -105,15 +109,14 @@ export default function Schedule() {
       const dt = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m);
       if (dt < new Date()) dt.setDate(dt.getDate() + 1);
 
-      const created = await postSchedule({
+      // Insert directly to Supabase. The real-time subscription will pick up the
+      // new record and add it to state — we do NOT manually push here to prevent duplicates.
+      await postSchedule({
         userId,
         scheduledTime: dt.toISOString(),
         niche: isAutoNiche ? 'AUTO' : selectedNiche,
       });
 
-      setSchedules(prev => [...prev, created as ScheduleType].sort(
-        (a, b) => new Date(a.scheduled_time).getTime() - new Date(b.scheduled_time).getTime()
-      ));
       setShowSuccess(true);
       setTime('');
       setTimeout(() => setShowSuccess(false), 2500);
@@ -522,10 +525,10 @@ function ScheduleRow({
 
                 {s.last_error && (
                   <div className="flex items-start gap-2">
-                    <TerminalSquare size={12} className="text-red-400 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <p className="text-[10px] uppercase font-mono text-white/30 mb-0.5">Error / Note</p>
-                      <p className="text-xs text-red-400 font-mono break-all">{s.last_error}</p>
+                    <AlertCircle size={12} className="text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[10px] uppercase font-mono text-white/30 mb-0.5">Last Error</p>
+                      <p className="text-xs font-mono text-red-300 break-all">{s.last_error}</p>
                     </div>
                   </div>
                 )}

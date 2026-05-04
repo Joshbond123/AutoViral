@@ -23,6 +23,39 @@ function formatTitle(title: string): string {
   return title.length > 60 ? title.slice(0, 57) + '...' : title;
 }
 
+/**
+ * Build a character-position-based subtitle timing table.
+ * Each entry stores the frame at which a word group (chunk) starts.
+ * Using character counts gives a better approximation of speech duration
+ * than treating every word as equally long.
+ */
+function buildSubtitleChunks(
+  words: string[],
+  durationInFrames: number,
+  chunkSize: number,
+): Array<{ text: string; startFrame: number; endFrame: number }> {
+  if (words.length === 0) return [];
+
+  // Total character count (used for proportional timing)
+  const totalChars = words.reduce((sum, w) => sum + w.length, 0);
+
+  const chunks: Array<{ text: string; startFrame: number; endFrame: number }> = [];
+  let charsSoFar = 0;
+
+  for (let i = 0; i < words.length; i += chunkSize) {
+    const chunkWords = words.slice(i, i + chunkSize);
+    const chunkChars = chunkWords.reduce((s, w) => s + w.length, 0);
+
+    const startFrame = Math.round((charsSoFar / totalChars) * durationInFrames);
+    charsSoFar += chunkChars;
+    const endFrame = Math.round((charsSoFar / totalChars) * durationInFrames);
+
+    chunks.push({ text: chunkWords.join(' ').toUpperCase(), startFrame, endFrame });
+  }
+
+  return chunks;
+}
+
 export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   scenes,
   audioSrc,
@@ -52,20 +85,22 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
     ? interpolate(sceneLocalFrame, [0, framesPerScene], [0, 2], { extrapolateRight: 'clamp' })
     : interpolate(sceneLocalFrame, [0, framesPerScene], [0, -2], { extrapolateRight: 'clamp' });
 
-  // ── Subtitle Engine ───────────────────────────────────────────────────────
+  // ── Subtitle Engine — character-count-based timing ─────────────────────
   const words = script.trim().split(/\s+/).filter(Boolean);
-  const totalWords = words.length;
   const CHUNK = 4; // words per caption card
 
-  // Which word is currently being spoken (linear mapping)
-  const currentWordIdx = Math.min(Math.floor((frame / durationInFrames) * totalWords), totalWords - 1);
-  const chunkStart = Math.floor(currentWordIdx / CHUNK) * CHUNK;
-  const chunkWords = words.slice(chunkStart, Math.min(chunkStart + CHUNK, totalWords));
-  const subtitle = chunkWords.join(' ').toUpperCase();
+  const subtitleChunks = buildSubtitleChunks(words, durationInFrames, CHUNK);
 
-  // Frame at which this chunk started showing
-  const chunkStartFrame = Math.round((chunkStart / totalWords) * durationInFrames);
-  const localChunkFrame = frame - chunkStartFrame;
+  // Find the active subtitle chunk for the current frame
+  const activeChunk = subtitleChunks.reduce<typeof subtitleChunks[0] | null>((found, chunk) => {
+    if (frame >= chunk.startFrame && frame < chunk.endFrame) return chunk;
+    return found;
+  }, null) ?? subtitleChunks[subtitleChunks.length - 1];
+
+  const subtitle = activeChunk?.text ?? '';
+
+  // Local frame within the current chunk (for bounce-in animation)
+  const localChunkFrame = activeChunk ? frame - activeChunk.startFrame : 0;
 
   // Bounce-in animation — fires on each new chunk
   const bounceIn = spring({
@@ -81,13 +116,6 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
 
   // ── Progress Bar ──────────────────────────────────────────────────────────
   const progress = frame / durationInFrames;
-
-  // ── Warning Badge Pulse ───────────────────────────────────────────────────
-  const warningPulse = interpolate(
-    Math.sin((frame / fps) * Math.PI * 2),
-    [-1, 1],
-    [0.5, 1.0]
-  );
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#0a0a0f', opacity: globalFadeIn }}>
@@ -140,46 +168,8 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
         }}
       />
 
-      {/* ── AUTOVIRAL Badge (top-left) ─────────────────────────────────── */}
+      {/* ── SCAM ALERT Badge (top-left) ────────────────────────────────── */}
       <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '52px 44px 0' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            background: 'linear-gradient(135deg, #fe2c55 0%, #ff0050 100%)',
-            borderRadius: 100,
-            padding: '12px 28px',
-            boxShadow: '0 4px 24px rgba(254,44,85,0.65)',
-          }}
-        >
-          <div
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: '#fff',
-              boxShadow: '0 0 12px #fff, 0 0 4px #fff',
-              opacity: warningPulse,
-            }}
-          />
-          <span
-            style={{
-              color: '#fff',
-              fontSize: 24,
-              fontWeight: 800,
-              fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
-              letterSpacing: 4,
-              textTransform: 'uppercase',
-            }}
-          >
-            AUTOVIRAL
-          </span>
-        </div>
-      </AbsoluteFill>
-
-      {/* ── SCAM ALERT Badge ──────────────────────────────────────────── */}
-      <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '148px 44px 0' }}>
         <div
           style={{
             background: 'rgba(255,40,0,0.92)',
@@ -209,7 +199,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
       </AbsoluteFill>
 
       {/* ── Title (upper area) ────────────────────────────────────────── */}
-      <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '256px 44px 0' }}>
+      <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '170px 44px 0' }}>
         <p
           style={{
             fontSize: 46,

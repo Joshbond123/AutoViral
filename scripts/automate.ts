@@ -279,12 +279,20 @@ async function generateVoiceover(script: string): Promise<Buffer> {
 // ─── Image Generation ─────────────────────────────────────────────────────────
 
 async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
-  // Critical: multiple explicit "no text" instructions to prevent text overlay in images
+  // Build a strongly constrained prompt to prevent text and landscape orientation.
+  // The Cloudflare Flux model sometimes renders text or landscape images — we fight
+  // this with explicit negative framing baked into the prompt itself.
+  const cleanDesc = sceneDesc
+    .replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '')
+    .replace(/\[.*?\]/g, '')
+    .trim();
+
   const prompt = [
-    sceneDesc,
-    'Vertical 9:16 format, cinematic, dark dramatic atmosphere, professional photography.',
-    'CRITICAL: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels anywhere in the image.',
-    'Pure photographic/cinematic visual only.',
+    cleanDesc,
+    'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, cinematic dark dramatic atmosphere, professional photography, photorealistic.',
+    'STRICT: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels, NO signs, NO titles anywhere in the image — pure visual only.',
+    'Do NOT split into panels or multiple images. Single full-frame portrait scene only.',
+    'Do NOT include any writing, typography, or overlaid text of any kind.',
   ].join(' ');
 
   return tryWithKeys('cloudflare', async (cfToken) => {
@@ -303,18 +311,56 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, num_steps: 4 }),
+        body: JSON.stringify({ prompt, num_steps: 8 }),
       }
     );
     if (!resp.ok) throw new Error(`Cloudflare image (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
 
     const ct = resp.headers.get('content-type') ?? '';
-    if (ct.includes('image/')) return Buffer.from(await resp.arrayBuffer());
+    if (ct.includes('image/')) {
+      const buf = Buffer.from(await resp.arrayBuffer());
+      return cropToPortrait(buf);
+    }
 
     const json = await resp.json() as any;
-    if (json?.result?.image) return Buffer.from(json.result.image, 'base64');
+    if (json?.result?.image) {
+      const buf = Buffer.from(json.result.image, 'base64');
+      return cropToPortrait(buf);
+    }
     throw new Error(`Unexpected Cloudflare response for scene ${index + 1}`);
   });
+}
+
+/**
+ * If the model returns a landscape or square image, crop it to a portrait 9:16 center crop
+ * so it fills the 1080×1920 TikTok frame cleanly without appearing "split".
+ * Uses ImageMagick (available on the GitHub Actions runner) for the crop.
+ */
+async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
+  try {
+    const { writeFileSync, readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const { execSync } = await import('child_process');
+    const { tmpdir } = await import('os');
+
+    const tmpIn = join(tmpdir(), `img_in_${Date.now()}.jpg`);
+    const tmpOut = join(tmpdir(), `img_out_${Date.now()}.jpg`);
+    writeFileSync(tmpIn, imgBuf);
+
+    // Resize to cover 1080×1920 keeping aspect ratio, then center-crop to exactly 1080×1920.
+    execSync(
+      `convert "${tmpIn}" -resize 1080x1920^ -gravity Center -extent 1080x1920 "${tmpOut}"`,
+      { timeout: 15000 }
+    );
+
+    const out = readFileSync(tmpOut);
+    // Clean up temp files
+    try { execSync(`rm -f "${tmpIn}" "${tmpOut}"`); } catch { /* ignore */ }
+    return out;
+  } catch {
+    // If ImageMagick is not available or fails, return the original buffer unchanged.
+    return imgBuf;
+  }
 }
 
 // ─── Background Music ─────────────────────────────────────────────────────────

@@ -151,29 +151,39 @@ Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 // ─── Script Generation ────────────────────────────────────────────────────────
 
 async function generateScript(topic: string, niche: string): Promise<ScriptResult> {
-  const prompt = `Create a VIRAL TikTok script for crypto scam awareness.
+  const prompt = `You are a viral TikTok content creator for crypto scam awareness.
+
 Topic: "${topic}"
 Niche: ${niche}
 
-Rules:
-- Hook in first 2 seconds (shocking fact or question)
-- Total 45-55 seconds of spoken content
-- Fast-paced, dramatic, informative
-- End with: "Follow for daily crypto scam warnings!"
-- Do NOT use emojis in the voiceover script
+Write a complete TikTok video package. Follow every rule exactly.
 
-CRITICAL: You MUST generate exactly 5 unique scene descriptions. Each scene MUST be a pure VISUAL description only — NO TEXT, NO WORDS, NO LETTERS, NO NUMBERS, NO CAPTIONS in any scene. Describe ONLY what is visually happening (people, objects, environments, emotions, colors, lighting).
+VOICEOVER RULES (the "script" field):
+- Pure natural spoken words only — exactly what the narrator says out loud to the camera
+- Start with a shocking hook (alarming question or fact) in the very first sentence
+- 120-150 words total (45-55 seconds when spoken at a normal pace)
+- Direct, personal — use "you", "your", speak to the viewer
+- End with exactly this sentence: "Follow for daily crypto scam warnings."
+- FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
+- Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
-Return ONLY valid JSON (no markdown, no explanation):
+SCENE RULES (the "scenes" array):
+- Exactly 5 scenes
+- Each is a pure VISUAL description for an AI image generator — describe only what is SEEN
+- NO text, NO words, NO letters, NO numbers anywhere in any scene description
+- NO "Scene 1:" prefix or any labels — just the visual description directly
+- Portrait 9:16 cinematic style, dark dramatic atmosphere
+
+Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 {
-  "title": "Eye-catching TikTok title under 80 chars",
-  "script": "Full voiceover script as single paragraph, natural speech, 45-55 seconds when read aloud",
+  "title": "Viral TikTok title, under 80 characters, no emojis",
+  "script": "Pure spoken voiceover paragraph — no labels or directions",
   "scenes": [
-    "Scene 1: [pure visual description — e.g. A shadowy figure in a dark hoodie sitting behind multiple monitors in a dim room, blue light casting harsh shadows, cinematic 9:16 vertical]",
-    "Scene 2: [pure visual description]",
-    "Scene 3: [pure visual description]",
-    "Scene 4: [pure visual description]",
-    "Scene 5: [pure visual description]"
+    "A hooded figure hunched over glowing monitors in a dark room, blue neon light, cinematic portrait",
+    "A close-up of a person's devastated face illuminated by a phone screen, dramatic dark lighting",
+    "Golden coins dissolving into shadow, slow motion, dark cinematic atmosphere, vertical portrait",
+    "Two silhouetted figures exchanging something in a dimly lit alley, suspicious, cinematic",
+    "An empty wallet and a cracked phone screen lying on a dark table, dramatic low lighting"
   ]
 }`;
 
@@ -234,13 +244,25 @@ Return ONLY valid JSON (no markdown, no explanation):
 
 // ─── Voiceover ────────────────────────────────────────────────────────────────
 
-async function generateVoiceover(script: string): Promise<Buffer> {
-  // Clean script of markdown and limit length
-  const cleanScript = script
-    .replace(/[*_~`#\[\]]/g, '')
-    .replace(/\s+/g, ' ')
+/**
+ * Strip anything from the script that is NOT spoken words:
+ * brackets, stage directions, label prefixes, markdown, Scene/Script headers.
+ * This prevents the TTS from reading "[dramatic pause]" or "Scene 1: …" aloud.
+ */
+function cleanVoiceoverScript(raw: string): string {
+  return raw
+    .replace(/\[.*?\]/g, '')                                                         // [brackets]
+    .replace(/\((?![a-z]'[a-z]).*?\)/gi, '')                                         // (stage notes) — keep contractions like (it's)
+    .replace(/^(scene|script|voiceover|narrator|note|hook|cta|body|intro|outro|title)\s*[\d:.\-]*.*/gim, '')  // label lines
+    .replace(/^scene\s*\d+.*/gim, '')                                                 // "Scene 1 …" lines
+    .replace(/[*_~`#]/g, '')                                                          // markdown
+    .replace(/\s{2,}/g, ' ')
     .trim()
     .slice(0, 3000);
+}
+
+async function generateVoiceover(script: string): Promise<Buffer> {
+  const cleanScript = cleanVoiceoverScript(script);
 
   return tryWithKeys('unrealspeech', async (key) => {
     const resp = await fetch('https://api.v6.unrealspeech.com/speech', {
@@ -403,9 +425,80 @@ async function assembleVideoWithRemotion(
   const { bundle } = await import('@remotion/bundler') as any;
   const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
 
+  const FPS = 30;
+  const OUTRO_SEC = 2.0; // extra seconds after voiceover ends for the CTA to hold
+
+  // ── Get exact audio duration via ffprobe ───────────────────────────────────
+  // ffprobe is pre-installed on GitHub Actions ubuntu-latest runners.
+  const audioBytes = readFileSync(audioPath).byteLength;
+  const hasAudio = audioBytes > 1000;
+  let audioDurationSec = 35; // safe default
+
+  if (hasAudio) {
+    try {
+      const ffOut = execSync(
+        `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`,
+        { timeout: 12000 }
+      ).toString().trim();
+      const probed = parseFloat(ffOut);
+      if (isFinite(probed) && probed > 3) {
+        audioDurationSec = probed;
+        console.log(`  Audio duration (ffprobe): ${audioDurationSec.toFixed(2)}s`);
+      } else {
+        throw new Error('ffprobe returned invalid value');
+      }
+    } catch {
+      // Fallback: bitrate estimate (192 kbps CBR → 24000 bytes/sec)
+      audioDurationSec = Math.max((audioBytes * 8) / (192 * 1000), 20);
+      console.log(`  Audio duration (estimated): ${audioDurationSec.toFixed(2)}s`);
+    }
+  }
+
+  const totalSec = Math.min(audioDurationSec + OUTRO_SEC, 82);
+  const durationInFrames = Math.ceil(totalSec * FPS);
+  const audioDurationFrames = Math.round(audioDurationSec * FPS);
+  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${OUTRO_SEC}s outro)`);
+
+  // ── Pre-calculate subtitle timings ─────────────────────────────────────────
+  // Uses a words-per-second model matching UnrealSpeech Scarlett at Speed=-0.1.
+  // This is far more accurate than a character-count heuristic and ensures
+  // subtitles stay in sync with the actual voiceover.
+  const WORDS_PER_SEC = 2.65; // Scarlett voice at Speed=-0.1 ≈ 2.65 wps empirically
+  const SUBTITLE_CHUNK = 4;   // words per caption card
+  const cleanedScript = cleanVoiceoverScript(script);
+  const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
+
+  const subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
+  for (let i = 0; i < scriptWords.length; i += SUBTITLE_CHUNK) {
+    const chunk = scriptWords.slice(i, i + SUBTITLE_CHUNK);
+    const startSec = i / WORDS_PER_SEC;
+    const endSec = (i + chunk.length) / WORDS_PER_SEC;
+
+    // Don't show subtitles in the outro section
+    if (startSec >= audioDurationSec) break;
+
+    subtitleTimings.push({
+      text: chunk.join(' ').toUpperCase(),
+      startFrame: Math.round(startSec * FPS),
+      endFrame: Math.min(Math.round(endSec * FPS), audioDurationFrames),
+    });
+  }
+
+  // Safety: if computed subtitle end exceeds actual audio frames, scale all down
+  const lastTiming = subtitleTimings[subtitleTimings.length - 1];
+  if (lastTiming && lastTiming.endFrame > audioDurationFrames) {
+    const scale = audioDurationFrames / lastTiming.endFrame;
+    for (const t of subtitleTimings) {
+      t.startFrame = Math.round(t.startFrame * scale);
+      t.endFrame   = Math.round(t.endFrame   * scale);
+    }
+  }
+
+  console.log(`  Subtitle chunks: ${subtitleTimings.length} (${SUBTITLE_CHUNK} words each)`);
+
+  // ── Convert assets to base64 data URLs ────────────────────────────────────
   console.log('  Converting assets to data URLs...');
 
-  // Convert all scene images to base64 data URLs
   const scenes = imagePaths.map(p => {
     const data = readFileSync(p).toString('base64');
     return `data:image/jpeg;base64,${data}`;
@@ -413,14 +506,11 @@ async function assembleVideoWithRemotion(
 
   console.log(`  → ${scenes.length} scene(s) loaded`);
 
-  const audioBytes = readFileSync(audioPath).byteLength;
-  const hasAudio = audioBytes > 1000;
   const audioSrc = hasAudio
     ? `data:audio/mpeg;base64,${readFileSync(audioPath).toString('base64')}`
     : '';
   if (!hasAudio) console.warn('  ⚠ Audio file empty — rendering without voiceover');
 
-  // Convert background music to data URL
   let musicSrc = '';
   if (musicPath) {
     try {
@@ -430,14 +520,7 @@ async function assembleVideoWithRemotion(
     } catch { /* skip music if it fails */ }
   }
 
-  // Estimate duration from MP3 file size at 192kbps; minimum 25s, maximum 75s
-  const estimatedSeconds = hasAudio
-    ? Math.min(Math.max((audioBytes * 8) / (192 * 1000), 25), 75)
-    : 35;
-  const durationInFrames = Math.ceil(estimatedSeconds * 30);
-  console.log(`  Estimated duration: ${estimatedSeconds.toFixed(1)}s → ${durationInFrames} frames`);
-
-  const inputProps = { scenes, audioSrc, musicSrc, script, title, durationInFrames };
+  const inputProps = { scenes, audioSrc, musicSrc, script: cleanedScript, title, durationInFrames, subtitleTimings };
 
   console.log('  Bundling Remotion composition...');
   const entryPoint = join(__dirname, 'remotion', 'root.tsx');

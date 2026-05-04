@@ -1,9 +1,9 @@
 import { motion } from 'motion/react';
-import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2, LogOut, TrendingUp } from 'lucide-react';
+import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2, LogOut, TrendingUp, Film } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Post } from '../types';
-import { fetchHistory, fetchProfile, TikTokProfile, fetchScheduledCount } from '../lib/api';
+import { fetchHistory, fetchProfile, TikTokProfile, fetchScheduledCount, subscribeToPosts } from '../lib/api';
 
 export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -46,7 +46,19 @@ export default function Dashboard() {
       setLoading(false);
     })();
 
-    return () => { cancelled = true; };
+    // Real-time subscription — updates dashboard live when pipeline runs
+    const unsub = subscribeToPosts(userId, (post) => {
+      setPosts(prev => {
+        const exists = prev.find(p => p.id === post.id);
+        if (exists) return prev.map(p => p.id === post.id ? post : p);
+        return [post, ...prev].slice(0, 20);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, []);
 
   const handleSignOut = () => {
@@ -161,7 +173,7 @@ export default function Dashboard() {
                 <div key={post.id} className="p-4 flex items-center gap-4">
                   <div className="w-10 h-14 rounded-lg bg-surface-lighter overflow-hidden border border-white/10 shrink-0">
                     {post.thumbnail_url ? (
-                      <img src={post.thumbnail_url} className="w-full h-full object-cover" />
+                      <img src={post.thumbnail_url} className="w-full h-full object-cover" alt="" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-white/10">
                         <Play size={14} fill="currentColor" />
@@ -169,12 +181,12 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate">{post.title || post.topic}</p>
-                    <p className="text-white/40 text-xs truncate">{post.niche}</p>
+                    <p className="font-semibold text-sm truncate">{post.title || post.topic || 'Generating…'}</p>
+                    <p className="text-white/40 text-xs truncate">{post.niche || '—'}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <StatusBadge status={post.status} />
                       <span className="text-xs text-white/30 font-mono">
-                        {post.published_at ? new Date(post.published_at).toLocaleDateString() : 'N/A'}
+                        {post.published_at ? new Date(post.published_at).toLocaleDateString() : '—'}
                       </span>
                     </div>
                   </div>
@@ -210,7 +222,7 @@ export default function Dashboard() {
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-16 rounded-lg bg-surface-lighter overflow-hidden border border-white/10 shrink-0">
                           {post.thumbnail_url ? (
-                            <img src={post.thumbnail_url} className="w-full h-full object-cover" />
+                            <img src={post.thumbnail_url} className="w-full h-full object-cover" alt="" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-white/10">
                               <Play size={16} fill="currentColor" />
@@ -218,26 +230,43 @@ export default function Dashboard() {
                           )}
                         </div>
                         <div className="max-w-[200px]">
-                          <p className="font-semibold text-sm truncate">{post.title || post.topic}</p>
+                          <p className="font-semibold text-sm truncate">{post.title || post.topic || 'Generating…'}</p>
                           <p className="text-white/40 text-xs truncate">ID: {post.id.substring(0, 8)}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="space-y-1">
-                        <p className="text-sm font-medium">{post.topic}</p>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary font-mono uppercase tracking-wider">{post.niche}</span>
+                        <p className="text-sm font-medium">{post.topic || '—'}</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary font-mono uppercase tracking-wider">
+                          {post.niche || '—'}
+                        </span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <StatusBadge status={post.status} />
                     </td>
                     <td className="px-6 py-4">
-                      <p className="text-sm text-white/60">{post.published_at ? new Date(post.published_at).toLocaleDateString() : 'N/A'}</p>
-                      <p className="text-xs text-white/20 font-mono">{post.published_at ? new Date(post.published_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                      <p className="text-sm text-white/60">
+                        {post.published_at ? new Date(post.published_at).toLocaleDateString() : '—'}
+                      </p>
+                      <p className="text-xs text-white/20 font-mono">
+                        {post.published_at ? new Date(post.published_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      </p>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
+                        {post.video_url && (
+                          <a
+                            href={post.video_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all"
+                            title="Watch video"
+                          >
+                            <Eye size={16} />
+                          </a>
+                        )}
                         <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
                           <BarChart2 size={16} />
                         </button>
@@ -257,27 +286,22 @@ export default function Dashboard() {
   );
 }
 
-function StatusBadge({ status }: { status: Post['status'] }) {
-  const styles = {
-    pending: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-    processing: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-    published: 'bg-green-500/10 text-green-500 border-green-500/20',
-    failed: 'bg-red-500/10 text-red-500 border-red-500/20',
+function StatusBadge({ status }: { status: Post['status'] | string }) {
+  const cfg: Record<string, { style: string; Icon: React.ElementType; label: string }> = {
+    pending:    { style: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',  Icon: Clock,        label: 'Pending'    },
+    processing: { style: 'bg-blue-500/10 text-blue-400 border-blue-500/20',        Icon: AlertCircle,  label: 'Processing' },
+    rendered:   { style: 'bg-purple-500/10 text-purple-400 border-purple-500/20',  Icon: Film,         label: 'Rendered'   },
+    published:  { style: 'bg-green-500/10 text-green-400 border-green-500/20',     Icon: CheckCircle2, label: 'Published'  },
+    failed:     { style: 'bg-red-500/10 text-red-400 border-red-500/20',           Icon: AlertCircle,  label: 'Failed'     },
   };
 
-  const icons = {
-    pending: Clock,
-    processing: AlertCircle,
-    published: CheckCircle2,
-    failed: AlertCircle,
-  };
-
-  const Icon = icons[status];
+  const entry = cfg[status] ?? { style: 'bg-white/5 text-white/40 border-white/10', Icon: Clock, label: status };
+  const { style, Icon, label } = entry;
 
   return (
-    <span className={`flex items-center gap-1.5 w-fit px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${styles[status]}`}>
+    <span className={`flex items-center gap-1.5 w-fit px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${style}`}>
       <Icon size={10} strokeWidth={3} />
-      {status}
+      {label}
     </span>
   );
 }

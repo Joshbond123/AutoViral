@@ -10,6 +10,12 @@ import {
   spring,
 } from 'remotion';
 
+export interface SubtitleTiming {
+  text: string;
+  startFrame: number;
+  endFrame: number;
+}
+
 export interface TikTokVideoProps {
   scenes: string[];
   audioSrc: string;
@@ -17,6 +23,8 @@ export interface TikTokVideoProps {
   script: string;
   title: string;
   durationInFrames: number;
+  /** Pre-calculated word-level subtitle timings from the pipeline (preferred over heuristic) */
+  subtitleTimings?: SubtitleTiming[];
 }
 
 function formatTitle(title: string): string {
@@ -24,35 +32,26 @@ function formatTitle(title: string): string {
 }
 
 /**
- * Build a character-position-based subtitle timing table.
- * Each entry stores the frame at which a word group (chunk) starts.
- * Using character counts gives a better approximation of speech duration
- * than treating every word as equally long.
+ * Character-count-based fallback subtitle timing.
+ * Only used when subtitleTimings are not provided from the pipeline.
  */
-function buildSubtitleChunks(
+function buildFallbackChunks(
   words: string[],
-  durationInFrames: number,
+  audioDurationFrames: number,
   chunkSize: number,
-): Array<{ text: string; startFrame: number; endFrame: number }> {
+): SubtitleTiming[] {
   if (words.length === 0) return [];
-
-  // Total character count (used for proportional timing)
   const totalChars = words.reduce((sum, w) => sum + w.length, 0);
-
-  const chunks: Array<{ text: string; startFrame: number; endFrame: number }> = [];
+  const chunks: SubtitleTiming[] = [];
   let charsSoFar = 0;
-
   for (let i = 0; i < words.length; i += chunkSize) {
-    const chunkWords = words.slice(i, i + chunkSize);
-    const chunkChars = chunkWords.reduce((s, w) => s + w.length, 0);
-
-    const startFrame = Math.round((charsSoFar / totalChars) * durationInFrames);
+    const chunk = words.slice(i, i + chunkSize);
+    const chunkChars = chunk.reduce((s, w) => s + w.length, 0);
+    const startFrame = Math.round((charsSoFar / totalChars) * audioDurationFrames);
     charsSoFar += chunkChars;
-    const endFrame = Math.round((charsSoFar / totalChars) * durationInFrames);
-
-    chunks.push({ text: chunkWords.join(' ').toUpperCase(), startFrame, endFrame });
+    const endFrame = Math.round((charsSoFar / totalChars) * audioDurationFrames);
+    chunks.push({ text: chunk.join(' ').toUpperCase(), startFrame, endFrame });
   }
-
   return chunks;
 }
 
@@ -63,6 +62,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   script,
   title,
   durationInFrames,
+  subtitleTimings,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -70,75 +70,91 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   // ── Scene Management ──────────────────────────────────────────────────────
   const sceneCount = Math.max(scenes.length, 1);
   const framesPerScene = Math.ceil(durationInFrames / sceneCount);
-
   const currentScene = Math.min(Math.floor(frame / framesPerScene), sceneCount - 1);
   const sceneLocalFrame = frame - currentScene * framesPerScene;
 
-  // Ken Burns — zoom + drift direction alternates per scene
+  // Ken Burns — zoom + drift alternates per scene
   const kenBurnsScale = interpolate(
     sceneLocalFrame,
     [0, framesPerScene],
-    [1.0, 1.10],
+    [1.0, 1.08],
     { extrapolateRight: 'clamp' }
   );
   const kenBurnsX = currentScene % 2 === 0
-    ? interpolate(sceneLocalFrame, [0, framesPerScene], [0, 2], { extrapolateRight: 'clamp' })
-    : interpolate(sceneLocalFrame, [0, framesPerScene], [0, -2], { extrapolateRight: 'clamp' });
+    ? interpolate(sceneLocalFrame, [0, framesPerScene], [0, 1.5], { extrapolateRight: 'clamp' })
+    : interpolate(sceneLocalFrame, [0, framesPerScene], [0, -1.5], { extrapolateRight: 'clamp' });
 
-  // ── Subtitle Engine — character-count-based timing ─────────────────────
+  // ── Subtitle Engine ────────────────────────────────────────────────────────
+  // The audio occupies roughly the first (durationInFrames - outroFrames) frames.
+  // Subtitles are shown only during the voiceover, not during the outro.
+  const OUTRO_FRAMES = Math.round(1.5 * fps); // 1.5s outro tail (no subtitles)
+  const audioDurationFrames = durationInFrames - OUTRO_FRAMES;
+
   const words = script.trim().split(/\s+/).filter(Boolean);
-  const CHUNK = 4; // words per caption card
+  const CHUNK = 4;
 
-  const subtitleChunks = buildSubtitleChunks(words, durationInFrames, CHUNK);
+  // Prefer pre-calculated timings from the pipeline (words-per-second model);
+  // fall back to character-based heuristic for previews.
+  const resolvedTimings: SubtitleTiming[] =
+    subtitleTimings && subtitleTimings.length > 0
+      ? subtitleTimings
+      : buildFallbackChunks(words, audioDurationFrames, CHUNK);
 
-  // Find the active subtitle chunk for the current frame
-  const activeChunk = subtitleChunks.reduce<typeof subtitleChunks[0] | null>((found, chunk) => {
-    if (frame >= chunk.startFrame && frame < chunk.endFrame) return chunk;
-    return found;
-  }, null) ?? subtitleChunks[subtitleChunks.length - 1];
+  // Find active chunk: linear scan is fine for <100 chunks
+  const activeChunk = resolvedTimings.find(
+    c => frame >= c.startFrame && frame < c.endFrame
+  ) ?? null;
 
   const subtitle = activeChunk?.text ?? '';
+  const localChunkFrame = activeChunk ? Math.max(0, frame - activeChunk.startFrame) : 0;
 
-  // Local frame within the current chunk (for bounce-in animation)
-  const localChunkFrame = activeChunk ? frame - activeChunk.startFrame : 0;
-
-  // Bounce-in animation — fires on each new chunk
+  // Pop-in animation on each new chunk (first 12 frames of chunk)
   const bounceIn = spring({
-    frame: Math.max(0, Math.min(localChunkFrame, 15)),
+    frame: Math.min(localChunkFrame, 12),
     fps,
-    config: { damping: 10, stiffness: 500, mass: 0.4 },
+    config: { damping: 14, stiffness: 600, mass: 0.3 },
   });
-  const subtitleScale = interpolate(bounceIn, [0, 1], [0.78, 1.0]);
+  const subtitleScale = interpolate(bounceIn, [0, 1], [0.82, 1.0]);
   const subtitleOpacity = interpolate(bounceIn, [0, 1], [0.0, 1.0]);
 
-  // ── Global Fade-in ────────────────────────────────────────────────────────
-  const globalFadeIn = interpolate(frame, [0, 18], [0, 1], { extrapolateRight: 'clamp' });
+  // ── Global Fade-in / Fade-out ─────────────────────────────────────────────
+  const globalFadeIn  = interpolate(frame, [0, 18], [0, 1], { extrapolateRight: 'clamp' });
+  const globalFadeOut = interpolate(frame, [durationInFrames - 18, durationInFrames - 1], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const globalOpacity = Math.min(globalFadeIn, globalFadeOut);
 
   // ── Progress Bar ──────────────────────────────────────────────────────────
   const progress = frame / durationInFrames;
 
+  // ── Outro CTA boost ───────────────────────────────────────────────────────
+  // In the last 1.5s the CTA pulses slightly to draw attention
+  const isOutro = frame >= audioDurationFrames;
+  const ctaScale = isOutro
+    ? interpolate(frame, [audioDurationFrames, audioDurationFrames + fps * 0.4], [1, 1.05], { extrapolateRight: 'clamp' })
+    : 1;
+
   return (
-    <AbsoluteFill style={{ backgroundColor: '#0a0a0f', opacity: globalFadeIn }}>
+    <AbsoluteFill style={{ backgroundColor: '#050508', opacity: globalOpacity }}>
 
       {/* ── Voiceover ─────────────────────────────────────────────────── */}
       {audioSrc && <Audio src={audioSrc} volume={1.0} />}
 
-      {/* ── Background Music (low volume) ─────────────────────────────── */}
-      {musicSrc && <Audio src={musicSrc} volume={0.12} loop />}
+      {/* ── Background Music (low volume, looped) ─────────────────────── */}
+      {musicSrc && <Audio src={musicSrc} volume={0.10} loop />}
 
       {/* ── Scene Images with Ken Burns ───────────────────────────────── */}
       {scenes.map((src, i) => {
         const from = i * framesPerScene;
-        // Last scene extends to end; others get a small cross-fade overlap (+8 frames)
         const dur = i < sceneCount - 1
-          ? framesPerScene + 8
+          ? framesPerScene + 10
           : Math.max(durationInFrames - from, framesPerScene);
         const isActive = currentScene === i;
 
-        // Cross-fade opacity between scenes
         const sceneFadeIn = i === 0
           ? 1
-          : interpolate(frame - from, [0, 8], [0, 1], { extrapolateRight: 'clamp', extrapolateLeft: 'clamp' });
+          : interpolate(frame - from, [0, 10], [0, 1], { extrapolateRight: 'clamp', extrapolateLeft: 'clamp' });
 
         return (
           <Sequence key={i} from={from} durationInFrames={dur}>
@@ -164,7 +180,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
       <AbsoluteFill
         style={{
           background:
-            'linear-gradient(180deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.0) 22%, rgba(0,0,0,0.0) 45%, rgba(0,0,0,0.80) 100%)',
+            'linear-gradient(180deg, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.0) 20%, rgba(0,0,0,0.0) 50%, rgba(0,0,0,0.85) 100%)',
         }}
       />
 
@@ -172,21 +188,21 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
       <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '52px 44px 0' }}>
         <div
           style={{
-            background: 'rgba(255,40,0,0.92)',
+            background: 'rgba(220,30,0,0.93)',
             borderRadius: 10,
             padding: '10px 22px',
-            border: '2px solid rgba(255,120,0,0.9)',
-            boxShadow: '0 2px 20px rgba(255,40,0,0.55)',
+            border: '2px solid rgba(255,100,0,0.85)',
+            boxShadow: '0 2px 20px rgba(220,30,0,0.55)',
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
+            gap: 10,
           }}
         >
-          <span style={{ fontSize: 28, lineHeight: 1 }}>⚠️</span>
+          <span style={{ fontSize: 24, lineHeight: 1 }}>⚠️</span>
           <span
             style={{
               color: '#fff',
-              fontSize: 26,
+              fontSize: 24,
               fontWeight: 900,
               fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
               letterSpacing: 3,
@@ -199,10 +215,10 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
       </AbsoluteFill>
 
       {/* ── Title (upper area) ────────────────────────────────────────── */}
-      <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '170px 44px 0' }}>
+      <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '164px 44px 0' }}>
         <p
           style={{
-            fontSize: 46,
+            fontSize: 44,
             fontWeight: 900,
             color: '#fff',
             fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
@@ -210,7 +226,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
             margin: 0,
             textTransform: 'uppercase',
             textShadow: '0 2px 24px rgba(0,0,0,1), 0 0 50px rgba(0,0,0,0.9)',
-            maxWidth: '95%',
+            maxWidth: '92%',
           }}
         >
           {formatTitle(title).toUpperCase()}
@@ -218,57 +234,60 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
       </AbsoluteFill>
 
       {/* ── CENTER SUBTITLES — Viral TikTok Style ────────────────────── */}
-      <AbsoluteFill
-        style={{
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '0 28px',
-        }}
-      >
-        <div
+      {subtitle.length > 0 && (
+        <AbsoluteFill
           style={{
-            opacity: subtitleOpacity,
-            transform: `scale(${subtitleScale})`,
-            maxWidth: '96%',
-            textAlign: 'center',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '0 24px',
+            // Push subtitles slightly below center so they don't overlap the title
+            paddingTop: 120,
           }}
         >
-          <p
+          <div
             style={{
-              fontSize: 72,
-              fontWeight: 900,
-              color: '#FFFFFF',
+              opacity: subtitleOpacity,
+              transform: `scale(${subtitleScale})`,
+              maxWidth: '94%',
               textAlign: 'center',
-              fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
-              textTransform: 'uppercase',
-              lineHeight: 1.15,
-              margin: 0,
-              letterSpacing: 1,
-              // Thick black stroke for viral caption look
-              textShadow: [
-                '-4px -4px 0 #000',
-                '4px -4px 0 #000',
-                '-4px  4px 0 #000',
-                ' 4px  4px 0 #000',
-                '-4px  0   0 #000',
-                ' 4px  0   0 #000',
-                ' 0   -4px 0 #000',
-                ' 0    4px 0 #000',
-                '0 6px 30px rgba(0,0,0,0.9)',
-              ].join(', '),
             }}
           >
-            {subtitle}
-          </p>
-        </div>
-      </AbsoluteFill>
+            <p
+              style={{
+                fontSize: 76,
+                fontWeight: 900,
+                color: '#FFFF00',
+                textAlign: 'center',
+                fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
+                textTransform: 'uppercase',
+                lineHeight: 1.1,
+                margin: 0,
+                letterSpacing: 1,
+                textShadow: [
+                  '-3px -3px 0 #000',
+                  ' 3px -3px 0 #000',
+                  '-3px  3px 0 #000',
+                  ' 3px  3px 0 #000',
+                  '-3px  0   0 #000',
+                  ' 3px  0   0 #000',
+                  ' 0   -3px 0 #000',
+                  ' 0    3px 0 #000',
+                  '0 4px 28px rgba(0,0,0,0.95)',
+                ].join(', '),
+              }}
+            >
+              {subtitle}
+            </p>
+          </div>
+        </AbsoluteFill>
+      )}
 
       {/* ── FOLLOW CTA (bottom) ───────────────────────────────────────── */}
       <AbsoluteFill
         style={{
           justifyContent: 'flex-end',
           alignItems: 'center',
-          padding: '0 44px 110px',
+          padding: '0 44px 120px',
         }}
       >
         <div
@@ -277,12 +296,13 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
             borderRadius: 100,
             padding: '18px 52px',
             boxShadow: '0 6px 32px rgba(254,44,85,0.65)',
+            transform: `scale(${ctaScale})`,
           }}
         >
           <span
             style={{
               color: '#fff',
-              fontSize: 32,
+              fontSize: 30,
               fontWeight: 900,
               fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
               letterSpacing: 2,
@@ -294,15 +314,9 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
         </div>
       </AbsoluteFill>
 
-      {/* ── Progress Bar (bottom) ─────────────────────────────────────── */}
-      <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 0 80px' }}>
-        <div
-          style={{
-            width: '100%',
-            height: 6,
-            background: 'rgba(255,255,255,0.12)',
-          }}
-        >
+      {/* ── Progress Bar ──────────────────────────────────────────────── */}
+      <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 0 90px' }}>
+        <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.10)' }}>
           <div
             style={{
               width: `${Math.min(progress * 100, 100)}%`,

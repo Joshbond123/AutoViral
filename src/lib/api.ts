@@ -36,14 +36,19 @@ export async function fetchProfile(userId: string): Promise<TikTokProfile | null
 
 export async function fetchHistory(userId: string): Promise<Post[]> {
   if (!supabase) return [];
+  // Select only columns guaranteed to exist in the base schema.
+  // Do NOT sort by created_at — it may not exist in older deployments.
   const { data, error } = await supabase
     .from('posts')
-    .select('*')
+    .select('id, user_id, schedule_id, thumbnail_url, title, topic, niche, script, status, published_at, video_url, publish_result')
     .eq('user_id', userId)
     .order('published_at', { ascending: false, nullsFirst: false })
-    .order('created_at', { ascending: false })
     .limit(20);
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Non-fatal: log and return empty rather than crashing the whole dashboard
+    console.warn('fetchHistory error:', error.message);
+    return [];
+  }
   return (data ?? []) as Post[];
 }
 
@@ -65,7 +70,7 @@ export async function postSchedule(input: {
     .single();
   if (error) throw new Error(error.message);
 
-  // Best-effort: trigger GitHub Actions pipeline
+  // Best-effort: trigger GitHub Actions pipeline via edge function
   if (FUNCS_BASE) {
     fetch(`${FUNCS_BASE}/schedule`, {
       method: 'POST',

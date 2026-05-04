@@ -1,6 +1,7 @@
 import { LayoutDashboard, Calendar, History, Settings, LogOut, X } from 'lucide-react';
   import { NavLink } from 'react-router-dom';
   import { motion, AnimatePresence } from 'motion/react';
+  import { logoutTikTok } from '../lib/api';
 
   interface SidebarProps {
     isOpen: boolean;
@@ -8,11 +9,15 @@ import { LayoutDashboard, Calendar, History, Settings, LogOut, X } from 'lucide-
   }
 
   export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-    const handleLogout = () => {
-      // 1. Clear the TikTok session from localStorage
-      localStorage.removeItem('tiktok_user_id');
+    const handleLogout = async () => {
+      // 1. Server-side logout: revoke TikTok token + delete user data from Supabase
+      const userId = localStorage.getItem('tiktok_user_id');
+      if (userId) {
+        await logoutTikTok(userId);
+      }
 
-      // 2. Clear sessionStorage to remove any transient auth state
+      // 2. Clear all local authentication state
+      localStorage.removeItem('tiktok_user_id');
       sessionStorage.clear();
 
       // 3. Expire all first-party cookies (best-effort cleanup)
@@ -23,8 +28,8 @@ import { LayoutDashboard, Calendar, History, Settings, LogOut, X } from 'lucide-
       });
 
       // 4. Full page navigation so React state is re-initialized from scratch.
-      //    Using React Router's navigate() keeps isAuthenticated=true in memory,
-      //    causing an immediate redirect back to /dashboard after logout.
+      //    React Router's navigate() keeps isAuthenticated=true in memory,
+      //    causing an immediate redirect back to /dashboard.
       window.location.replace(import.meta.env.BASE_URL || '/AutoViral/');
     };
 

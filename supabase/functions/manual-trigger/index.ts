@@ -1,26 +1,29 @@
 // deno-lint-ignore-file
-import { corsHeaders, handleCors } from '../_shared/cors.ts';
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
+
+function handleCors(req: Request) {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  return null;
+}
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
   if (cors) return cors;
 
-  if (req.method !== 'POST') {
-    return json({ error: 'Method not allowed' }, 405);
-  }
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   try {
     const { userId, jobId, instant } = await req.json();
-    if (!userId || !jobId) {
-      return json({ error: 'Missing fields: userId and jobId are required' }, 400);
-    }
+    if (!userId || !jobId) return json({ error: 'Missing fields: userId and jobId are required' }, 400);
 
     const ghPat = Deno.env.get('GH_DISPATCH_PAT');
     const owner = Deno.env.get('GH_REPO_OWNER') || 'Joshbond123';
-    const repo = Deno.env.get('GH_REPO_NAME') || 'AutoViral';
+    const repo  = Deno.env.get('GH_REPO_NAME')  || 'AutoViral';
 
-    // Only dispatch immediately for "generate now" requests.
-    // Scheduled jobs will be picked up by the cron-based manual-generate workflow.
     if (ghPat && instant) {
       try {
         const dispatchResp = await fetch(

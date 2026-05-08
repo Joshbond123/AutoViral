@@ -1,21 +1,15 @@
 // deno-lint-ignore-file
-// Supabase Edge Function: send-push
-// Sends a Web Push notification to all subscriptions for a user.
-//
-// Required Supabase secrets:
-//   VAPID_PUBLIC_KEY  — from: npx web-push generate-vapid-keys
-//   VAPID_PRIVATE_KEY — from: npx web-push generate-vapid-keys
-//   SUPABASE_URL      — your Supabase project URL
-//   SUPABASE_SERVICE_ROLE_KEY — service role key
-
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3';
-import { corsHeaders, handleCors } from '../_shared/cors.ts';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
 
 Deno.serve(async (req) => {
-  const cors = handleCors(req);
-  if (cors) return cors;
-
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   try {

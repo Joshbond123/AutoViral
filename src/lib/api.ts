@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { ApiKey, ManualJob, Notification, Post, Schedule } from '../types';
+import { ApiKey, ManualJob, AppNotification, Post, Schedule } from '../types';
 
 const SUPABASE_URL: string =
   (import.meta as any).env?.VITE_SUPABASE_URL || '';
@@ -209,7 +209,7 @@ export async function deletePost(id: string): Promise<void> {
 
 // ─── Notification API ──────────────────────────────────────────────────────────
 
-export async function fetchNotifications(userId: string): Promise<Notification[]> {
+export async function fetchNotifications(userId: string): Promise<AppNotification[]> {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('notifications')
@@ -218,7 +218,7 @@ export async function fetchNotifications(userId: string): Promise<Notification[]
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) { console.warn('fetchNotifications error:', error.message); return []; }
-  return (data ?? []) as Notification[];
+  return (data ?? []) as AppNotification[];
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
@@ -236,12 +236,12 @@ export async function deleteNotification(id: string): Promise<void> {
   await supabase.from('notifications').delete().eq('id', id);
 }
 
-export function subscribeToNotifications(userId: string, callback: (notification: Notification) => void): (() => void) {
+export function subscribeToNotifications(userId: string, callback: (notification: AppNotification) => void): (() => void) {
   if (!supabase) return () => {};
   const channel = supabase
     .channel(`notifications:${userId}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-      if (payload.new) callback(payload.new as Notification);
+      if (payload.new) callback(payload.new as AppNotification);
     })
     .subscribe();
   return () => { supabase.removeChannel(channel); };

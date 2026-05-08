@@ -12,7 +12,7 @@ import {
   fetchNotifications, markNotificationRead, markAllNotificationsRead, deleteNotification,
   subscribeToNotifications, savePushSubscription, deletePushSubscription, getPushSubscription,
 } from '../lib/api';
-import { ManualJob, Notification, Post } from '../types';
+import { ManualJob, AppNotification, Post } from '../types';
 
 const NICHES = [
   'Daily Crypto Scam', 'Crypto Wallet Drain', 'Fake Crypto Guru Exposed',
@@ -99,7 +99,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 // ─── Notification Panel ───────────────────────────────────────────────────────
 
 function NotificationPanel({ notifications, onClose, onMarkRead, onMarkAllRead, onDelete }: {
-  notifications: Notification[];
+  notifications: AppNotification[];
   onClose: () => void;
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
@@ -531,7 +531,7 @@ export default function ManualGenerate() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(true);
 
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [notifPanelOpen, setNotifPanelOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);

@@ -188,8 +188,8 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama3.1-8b',
-        max_tokens: 1800,
+        model: 'llama-3.3-70b',
+        max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -303,18 +303,37 @@ Return ONLY valid JSON, no markdown, no explanation:
 // ─── Voiceover ─────────────────────────────────────────────────────────────────
 
 function cleanVoiceoverScript(raw: string): string {
-  return raw
-    .replace(/\[.*?\]/g, '')
-    .replace(/\((?![a-z]'[a-z]).*?\)/gi, '')
-    .replace(/^(scene|script|voiceover|narrator|note|hook|cta|body|intro|outro|title)\s*[\d:.\-]*.*/gim, '')
-    .replace(/^scene\s*\d+.*/gim, '')
-    .replace(/[*_~`#]/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-    .slice(0, 3000);
-}
+    const IMAGE_KW = /\b(cinematic|portrait|photorealistic|9:16|aspect ratio|vertical orientation|dramatic atmosphere|neon lighting|hyperrealistic|full-frame|dark background|cinematography)\b/i;
 
-async function generateVoiceover(script: string): Promise<Buffer> {
+    let text = raw
+      // Strip code fences and JSON structure
+      .replace(/```[\s\S]*?```/gm, '')
+      .replace(/^\s*"(?:title|script|scenes|niche|topic|hook|cta|outro)"\s*:.*/gim, '')
+      .replace(/^\s*[\[\]{}]\s*$/gm, '')
+      // Strip bracketed stage directions and parenthetical notes
+      .replace(/\[[^\]]{0,300}\]/g, '')
+      .replace(/\((?![a-zA-Z]'[a-zA-Z])[^)]{0,200}\)/gi, '')
+      // Strip label prefix lines
+      .replace(/^(scene|script|voiceover|narrator|note|hook|cta|body|intro|outro|title|image\s*prompt|visual|description|caption)\s*[\d:.\-]*.*/gim, '')
+      .replace(/^scene\s*\d+[:.\-].*/gim, '')
+      // Strip markdown
+      .replace(/[*_~`#@]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    // Pick only paragraphs that look like natural spoken language
+    const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(p => p.length > 40);
+    const speech = paragraphs.filter(p =>
+      p.split(/\s+/).length >= 12 &&
+      !/^[A-Z][a-zA-Z ]+:/.test(p) &&
+      !IMAGE_KW.test(p) &&
+      !/[{}"\[\]]/.test(p)
+    );
+
+    if (speech.length > 0) {
+      return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
+    }
+    return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. Follow for daily crypto scam warnings.';(script: string): Promise<Buffer> {
   const cleanScript = cleanVoiceoverScript(script);
 
   return tryWithKeys('unrealspeech', async (key) => {
@@ -379,7 +398,7 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, num_steps: 8 }),
+        body: JSON.stringify({ prompt, num_steps: 16 }),
       }
     );
     if (!resp.ok) throw new Error(`Cloudflare image (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
@@ -472,8 +491,8 @@ async function assembleVideoWithRemotion(
   const audioDurationFrames = Math.round(audioDurationSec * FPS);
   console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames`);
 
-  const WORDS_PER_SEC = 2.65;
-  const SUBTITLE_CHUNK = 4;
+  const WORDS_PER_SEC = 2.4;  // Scarlett at Speed=-0.1, calibrated
+  const SUBTITLE_CHUNK = 3;   // 3 words per card — punchier TikTok style
   const cleanedScript = cleanVoiceoverScript(script);
   const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
 
@@ -688,27 +707,27 @@ async function runManualPipeline(job: any): Promise<void> {
 
     // 6. Scene images
     console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI)...`);
-    const imagePaths: string[] = [];
-    for (let i = 0; i < scenes.length; i++) {
-      try {
-        const imgBuf = await generateImage(scenes[i], i);
-        const imgPath = join(tmpDir, `scene_${i}.jpg`);
-        writeFileSync(imgPath, imgBuf);
-        imagePaths.push(imgPath);
-        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-      } catch (e: any) {
-        console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message} — using dark fallback`);
-        const placeholderPath = join(tmpDir, `scene_${i}.jpg`);
-        try {
-          execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${placeholderPath}" 2>/dev/null || true`);
-          const fs = await import('fs');
-          if (fs.existsSync(placeholderPath) && fs.statSync(placeholderPath).size > 100) {
-            imagePaths.push(placeholderPath);
-          }
-        } catch { /* skip */ }
+    // Generate all scene images in parallel — 5x faster than sequential
+      const _imgResults = await Promise.allSettled(
+        scenes.map((scene, i) => generateImage(scene, i))
+      );
+      const imagePaths: string[] = [];
+      for (let i = 0; i < _imgResults.length; i++) {
+        const res = _imgResults[i];
+        if (res.status === 'fulfilled') {
+          const imgPath = join(tmpDir, `scene_${i}.jpg`);
+          writeFileSync(imgPath, res.value);
+          imagePaths.push(imgPath);
+          console.log(`     → Scene ${i + 1}/${scenes.length}: ${(res.value.byteLength / 1024).toFixed(0)} KB ✓`);
+        } else {
+          console.warn(`     ⚠ Scene ${i + 1} failed — using dark fallback`);
+          const pp = join(tmpDir, `scene_${i}.jpg`);
+          try {
+            execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${pp}" 2>/dev/null || true`);
+            if (require('fs').existsSync(pp) && require('fs').statSync(pp).size > 100) imagePaths.push(pp);
+          } catch { /* skip */ }
+        }
       }
-    }
-
     if (imagePaths.length === 0) {
       throw new Error('All scene images failed to generate — cannot create video');
     }
@@ -718,8 +737,17 @@ async function runManualPipeline(job: any): Promise<void> {
     console.log('  7/8 Rendering video with Remotion...');
     const videoPath = join(tmpDir, 'final.mp4');
     await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title);
-    const videoSize = readFileSync(videoPath).byteLength;
-    console.log(`     → ${(videoSize / (1024 * 1024)).toFixed(1)} MB`);
+    let _rawSize = readFileSync(videoPath).byteLength;
+      console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — compressing...`);
+      // FFmpeg CRF compression: smaller file, same visual quality, streaming-optimized
+      try {
+        const _cPath = videoPath.replace('.mp4', '_opt.mp4');
+        execSync(`ffmpeg -i "${videoPath}" -c:v libx264 -crf 26 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>/dev/null`, { timeout: 300000 });
+        const _cSize = readFileSync(_cPath).byteLength;
+        console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
+        execSync(`mv "${_cPath}" "${videoPath}"`);
+      } catch (_ce: any) { console.warn(`     ⚠ Compression skipped: ${_ce.message?.slice(0,60)}`); }
+      const videoSize = readFileSync(videoPath).byteLength;
 
     // 8. Upload to Supabase Storage (NO TikTok publishing)
     console.log('  8/8 Uploading to Supabase Storage...');

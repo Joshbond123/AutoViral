@@ -87,11 +87,11 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   // ── Subtitle Engine ────────────────────────────────────────────────────────
   // The audio occupies roughly the first (durationInFrames - outroFrames) frames.
   // Subtitles are shown only during the voiceover, not during the outro.
-  const OUTRO_FRAMES = Math.round(1.5 * fps); // 1.5s outro tail (no subtitles)
+  const OUTRO_FRAMES = Math.round(2.0 * fps); // 2.0s outro tail — gives CTA time to breathe
   const audioDurationFrames = durationInFrames - OUTRO_FRAMES;
 
   const words = script.trim().split(/\s+/).filter(Boolean);
-  const CHUNK = 4;
+  const CHUNK = 3; // 3-word chunks match pipeline setting
 
   // Prefer pre-calculated timings from the pipeline (words-per-second model);
   // fall back to character-based heuristic for previews.
@@ -233,54 +233,51 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
         </p>
       </AbsoluteFill>
 
-      {/* ── CENTER SUBTITLES — Viral TikTok Style ────────────────────── */}
-      {subtitle.length > 0 && (
-        <AbsoluteFill
-          style={{
-            justifyContent: 'center',
-            alignItems: 'center',
-            padding: '0 24px',
-            // Push subtitles slightly below center so they don't overlap the title
-            paddingTop: 120,
-          }}
-        >
-          <div
+      {/* ── SUBTITLES — TikTok bottom-center style with backdrop ─────────── */}
+        {subtitle.length > 0 && (
+          <AbsoluteFill
             style={{
-              opacity: subtitleOpacity,
-              transform: `scale(${subtitleScale})`,
-              maxWidth: '94%',
-              textAlign: 'center',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              paddingBottom: 220,
             }}
           >
-            <p
+            <div
               style={{
-                fontSize: 76,
-                fontWeight: 900,
-                color: '#FFFF00',
+                opacity: subtitleOpacity,
+                transform: `scale(${subtitleScale})`,
+                maxWidth: '90%',
                 textAlign: 'center',
-                fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
-                textTransform: 'uppercase',
-                lineHeight: 1.1,
-                margin: 0,
-                letterSpacing: 1,
-                textShadow: [
-                  '-3px -3px 0 #000',
-                  ' 3px -3px 0 #000',
-                  '-3px  3px 0 #000',
-                  ' 3px  3px 0 #000',
-                  '-3px  0   0 #000',
-                  ' 3px  0   0 #000',
-                  ' 0   -3px 0 #000',
-                  ' 0    3px 0 #000',
-                  '0 4px 28px rgba(0,0,0,0.95)',
-                ].join(', '),
+                padding: '16px 32px',
+                borderRadius: 16,
+                background: 'rgba(0,0,0,0.65)',
               }}
             >
-              {subtitle}
-            </p>
-          </div>
-        </AbsoluteFill>
-      )}
+              <p
+                style={{
+                  fontSize: 68,
+                  fontWeight: 900,
+                  color: '#FFFFFF',
+                  textAlign: 'center',
+                  fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
+                  textTransform: 'uppercase',
+                  lineHeight: 1.15,
+                  margin: 0,
+                  letterSpacing: 2,
+                  textShadow: [
+                    '-2px -2px 0 #000',
+                    ' 2px -2px 0 #000',
+                    '-2px  2px 0 #000',
+                    ' 2px  2px 0 #000',
+                    '0 0 20px rgba(255,255,255,0.12)',
+                  ].join(', '),
+                }}
+              >
+                {subtitle}
+              </p>
+            </div>
+          </AbsoluteFill>
+        )}
 
       {/* ── FOLLOW CTA (bottom) ───────────────────────────────────────── */}
       <AbsoluteFill

@@ -85,37 +85,42 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
     : interpolate(sceneLocalFrame, [0, framesPerScene], [0, -1.5], { extrapolateRight: 'clamp' });
 
   // ── Subtitle Engine ────────────────────────────────────────────────────────
-  // The audio occupies roughly the first (durationInFrames - outroFrames) frames.
-  // Subtitles are shown only during the voiceover, not during the outro.
-  const OUTRO_FRAMES = Math.round(2.0 * fps); // 2.0s outro tail — gives CTA time to breathe
+  const OUTRO_FRAMES = Math.round(2.0 * fps);
   const audioDurationFrames = durationInFrames - OUTRO_FRAMES;
 
   const words = script.trim().split(/\s+/).filter(Boolean);
-  const CHUNK = 3; // 3-word chunks match pipeline setting
+  const CHUNK = 3;
 
-  // Prefer pre-calculated timings from the pipeline (words-per-second model);
-  // fall back to character-based heuristic for previews.
   const resolvedTimings: SubtitleTiming[] =
     subtitleTimings && subtitleTimings.length > 0
       ? subtitleTimings
       : buildFallbackChunks(words, audioDurationFrames, CHUNK);
 
-  // Find active chunk: linear scan is fine for <100 chunks
   const activeChunk = resolvedTimings.find(
     c => frame >= c.startFrame && frame < c.endFrame
   ) ?? null;
 
   const subtitle = activeChunk?.text ?? '';
   const localChunkFrame = activeChunk ? Math.max(0, frame - activeChunk.startFrame) : 0;
+  const chunkDuration = activeChunk ? activeChunk.endFrame - activeChunk.startFrame : 1;
 
-  // Pop-in animation on each new chunk (first 12 frames of chunk)
+  // Pop-in spring animation — punchy TikTok style
   const bounceIn = spring({
-    frame: Math.min(localChunkFrame, 12),
+    frame: Math.min(localChunkFrame, 8),
     fps,
-    config: { damping: 14, stiffness: 600, mass: 0.3 },
+    config: { damping: 18, stiffness: 700, mass: 0.25 },
   });
-  const subtitleScale = interpolate(bounceIn, [0, 1], [0.82, 1.0]);
-  const subtitleOpacity = interpolate(bounceIn, [0, 1], [0.0, 1.0]);
+  const subtitleScale = interpolate(bounceIn, [0, 1], [0.78, 1.0]);
+
+  // Fade in fast, fade out in last 20% of chunk duration
+  const fadeInFrames = 4;
+  const fadeOutStart = Math.max(chunkDuration - 6, Math.floor(chunkDuration * 0.8));
+  const fadeIn = interpolate(localChunkFrame, [0, fadeInFrames], [0, 1], { extrapolateRight: 'clamp' });
+  const fadeOut = interpolate(localChunkFrame, [fadeOutStart, chunkDuration], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const subtitleOpacity = Math.min(fadeIn, fadeOut);
 
   // ── Global Fade-in / Fade-out ─────────────────────────────────────────────
   const globalFadeIn  = interpolate(frame, [0, 18], [0, 1], { extrapolateRight: 'clamp' });
@@ -129,7 +134,6 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   const progress = frame / durationInFrames;
 
   // ── Outro CTA boost ───────────────────────────────────────────────────────
-  // In the last 1.5s the CTA pulses slightly to draw attention
   const isOutro = frame >= audioDurationFrames;
   const ctaScale = isOutro
     ? interpolate(frame, [audioDurationFrames, audioDurationFrames + fps * 0.4], [1, 1.05], { extrapolateRight: 'clamp' })
@@ -180,7 +184,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
       <AbsoluteFill
         style={{
           background:
-            'linear-gradient(180deg, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.0) 20%, rgba(0,0,0,0.0) 50%, rgba(0,0,0,0.85) 100%)',
+            'linear-gradient(180deg, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.0) 20%, rgba(0,0,0,0.0) 45%, rgba(0,0,0,0.90) 100%)',
         }}
       />
 
@@ -233,51 +237,56 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
         </p>
       </AbsoluteFill>
 
-      {/* ── SUBTITLES — TikTok bottom-center style with backdrop ─────────── */}
-        {subtitle.length > 0 && (
-          <AbsoluteFill
+      {/* ── SUBTITLES — Modern viral TikTok style, transparent bg ─────── */}
+      {subtitle.length > 0 && (
+        <AbsoluteFill
+          style={{
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingTop: '30%',
+          }}
+        >
+          <div
             style={{
-              justifyContent: 'flex-end',
+              opacity: subtitleOpacity,
+              transform: `scale(${subtitleScale})`,
+              maxWidth: '88%',
+              textAlign: 'center',
+              background: 'transparent',
+              display: 'flex',
+              justifyContent: 'center',
               alignItems: 'center',
-              paddingBottom: 220,
             }}
           >
-            <div
+            <p
               style={{
-                opacity: subtitleOpacity,
-                transform: `scale(${subtitleScale})`,
-                maxWidth: '90%',
+                fontSize: 72,
+                fontWeight: 900,
+                color: '#FFFFFF',
                 textAlign: 'center',
-                padding: '16px 32px',
-                borderRadius: 16,
-                background: 'rgba(0,0,0,0.65)',
+                fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
+                textTransform: 'uppercase',
+                lineHeight: 1.1,
+                margin: 0,
+                letterSpacing: 3,
+                textShadow: [
+                  '-3px -3px 0 #000',
+                  ' 3px -3px 0 #000',
+                  '-3px  3px 0 #000',
+                  ' 3px  3px 0 #000',
+                  '-3px  0px 0 #000',
+                  ' 3px  0px 0 #000',
+                  ' 0px -3px 0 #000',
+                  ' 0px  3px 0 #000',
+                  '0 0 30px rgba(255,255,255,0.15)',
+                ].join(', '),
               }}
             >
-              <p
-                style={{
-                  fontSize: 68,
-                  fontWeight: 900,
-                  color: '#FFFFFF',
-                  textAlign: 'center',
-                  fontFamily: 'Impact, DejaVu Sans, Liberation Sans, Arial Black, sans-serif',
-                  textTransform: 'uppercase',
-                  lineHeight: 1.15,
-                  margin: 0,
-                  letterSpacing: 2,
-                  textShadow: [
-                    '-2px -2px 0 #000',
-                    ' 2px -2px 0 #000',
-                    '-2px  2px 0 #000',
-                    ' 2px  2px 0 #000',
-                    '0 0 20px rgba(255,255,255,0.12)',
-                  ].join(', '),
-                }}
-              >
-                {subtitle}
-              </p>
-            </div>
-          </AbsoluteFill>
-        )}
+              {subtitle}
+            </p>
+          </div>
+        </AbsoluteFill>
+      )}
 
       {/* ── FOLLOW CTA (bottom) ───────────────────────────────────────── */}
       <AbsoluteFill

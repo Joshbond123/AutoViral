@@ -351,7 +351,11 @@ function cleanVoiceoverScript(raw: string): string {
     if (speech.length > 0) {
       return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
     }
-    return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. Follow for daily crypto scam warnings.';(script: string): Promise<Buffer> {
+    return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. Follow for daily crypto scam warnings.';
+  }
+}
+
+async function generateVoiceover(script: string): Promise<Buffer> {
   const cleanScript = cleanVoiceoverScript(script);
 
   return tryWithKeys('unrealspeech', async (key) => {
@@ -817,6 +821,12 @@ async function runManualPipeline(job: any): Promise<void> {
 async function main(): Promise<void> {
   console.log('🎬 AutoViral Manual Generation Pipeline — ' + new Date().toISOString());
 
+  // Support instant dispatch: --job-id <uuid> skips scheduled_time filter and runs specific job
+  const jobIdArg = (() => {
+    const i = process.argv.indexOf('--job-id');
+    return i !== -1 ? process.argv[i + 1] : null;
+  })();
+
   const { data: activeKeys } = await supabase
     .from('api_keys')
     .select('service')
@@ -832,14 +842,31 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { data: jobs, error } = await supabase
-    .from('manual_jobs')
-    .select('*')
-    .eq('status', 'pending')
-    .lte('scheduled_time', new Date().toISOString());
+  let jobs: any[] | null = null;
+  let fetchError: any = null;
 
-  if (error) {
-    console.error('Failed to fetch manual jobs:', error.message);
+  if (jobIdArg) {
+    console.log(`🎯 Instant dispatch — running specific job: ${jobIdArg}`);
+    const res = await supabase
+      .from('manual_jobs')
+      .select('*')
+      .eq('id', jobIdArg)
+      .eq('status', 'pending')
+      .limit(1);
+    jobs = res.data;
+    fetchError = res.error;
+  } else {
+    const res = await supabase
+      .from('manual_jobs')
+      .select('*')
+      .eq('status', 'pending')
+      .lte('scheduled_time', new Date().toISOString());
+    jobs = res.data;
+    fetchError = res.error;
+  }
+
+  if (fetchError) {
+    console.error('Failed to fetch manual jobs:', fetchError.message);
     process.exit(1);
   }
 
@@ -853,9 +880,9 @@ async function main(): Promise<void> {
     await runManualPipeline(job);
   }
 
-  console.log('\n✅ All manual pipelines complete!');
+  console.log('
+✅ All manual pipelines complete!');
 }
-
 main().catch(err => {
   console.error('Fatal:', err);
   process.exit(1);

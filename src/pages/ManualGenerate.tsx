@@ -4,11 +4,11 @@ import {
   Zap, Clock, Wand2, ChevronRight, Loader2, AlertCircle, CheckCircle,
   Bell, BellDot, X, Play, Download, Copy, Trash2, Tag, Hash,
   RefreshCw, Film, Calendar, Activity, Timer, Check, Video,
-  BellOff, BellRing, ShieldCheck,
+  BellOff, BellRing, ShieldCheck, Edit2, CheckCircle2,
 } from 'lucide-react';
 import {
-  createManualJob, fetchManualJobs, deleteManualJob, subscribeToManualJobs,
-  fetchTodaysManualPosts, deletePost, subscribeToPosts,
+  createManualJob, fetchManualJobs, deleteManualJob, updateManualJob,
+  subscribeToManualJobs, fetchTodaysManualPosts, deletePost, subscribeToPosts,
   fetchNotifications, markNotificationRead, markAllNotificationsRead, deleteNotification,
   subscribeToNotifications, savePushSubscription, deletePushSubscription, getPushSubscription,
 } from '../lib/api';
@@ -26,8 +26,6 @@ const STATUS_STYLES: Record<string, string> = {
   failed:  'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
-// VAPID public key — set VITE_VAPID_PUBLIC_KEY in your .env file
-// Generate with: npx web-push generate-vapid-keys
 const VAPID_PUBLIC_KEY = (import.meta as any).env?.VITE_VAPID_PUBLIC_KEY || '';
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -42,6 +40,13 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 function fmtTime(iso: string) {
   try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
   catch { return iso; }
+}
+function fmtDateTime(iso: string) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' +
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch { return iso; }
 }
 function fmtRelative(iso: string) {
   try {
@@ -60,6 +65,17 @@ function fmtExecTime(ms: number) {
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
+/** Determine if a manual job was an instant "Generate Now" vs a scheduled job.
+ *  Instant jobs: scheduled_time is within 60s of created_at (we set it to now()).
+ */
+function isInstantJob(job: ManualJob): boolean {
+  if (!job.scheduled_time || !job.created_at) return true;
+  const diff = Math.abs(
+    new Date(job.scheduled_time).getTime() - new Date(job.created_at).getTime()
+  );
+  return diff < 60_000;
+}
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
 interface Toast { id: string; title: string; message: string; type: 'success' | 'error' | 'info'; }
@@ -70,7 +86,11 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
     return () => clearTimeout(t);
   }, [toast.id, onDismiss]);
 
-  const colors = { success: 'border-green-500/30 bg-green-500/10', error: 'border-red-500/30 bg-red-500/10', info: 'border-brand-secondary/30 bg-brand-secondary/10' };
+  const colors = {
+    success: 'border-green-500/30 bg-green-500/10',
+    error: 'border-red-500/30 bg-red-500/10',
+    info: 'border-brand-secondary/30 bg-brand-secondary/10',
+  };
   const icons = {
     success: <CheckCircle size={16} className="text-green-400 shrink-0" />,
     error:   <AlertCircle size={16} className="text-red-400 shrink-0" />,
@@ -220,7 +240,6 @@ function PushSubscriptionBanner({ userId }: { userId: string }) {
     try {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') { setStatus('denied'); return; }
-
       const sub = await swReg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
@@ -250,15 +269,11 @@ function PushSubscriptionBanner({ userId }: { userId: string }) {
     }
   };
 
-  if (status === 'loading') return null;
-  if (status === 'unsupported') return null;
-  if (status === 'no-vapid') return null;
+  if (status === 'loading' || status === 'unsupported' || status === 'no-vapid') return null;
 
   if (status === 'denied') {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
         className="flex items-start gap-3 px-5 py-4 rounded-2xl border bg-yellow-500/5 border-yellow-500/20 text-yellow-300"
       >
         <BellOff size={16} className="shrink-0 mt-0.5" />
@@ -274,16 +289,14 @@ function PushSubscriptionBanner({ userId }: { userId: string }) {
 
   if (status === 'subscribed') {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
         className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border bg-green-500/5 border-green-500/20"
       >
         <div className="flex items-center gap-3">
           <ShieldCheck size={18} className="text-green-400 shrink-0" />
           <div>
             <p className="text-sm font-semibold text-green-300">Push notifications enabled</p>
-            <p className="text-xs text-white/40 mt-0.5">You'll receive an alert on this device when your video is ready — even if the app is closed.</p>
+            <p className="text-xs text-white/40 mt-0.5">You'll receive an alert when your video is ready — even if the app is closed.</p>
           </div>
         </div>
         <button
@@ -298,11 +311,8 @@ function PushSubscriptionBanner({ userId }: { userId: string }) {
     );
   }
 
-  // status === 'idle'
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
+    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
       className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border bg-brand-secondary/5 border-brand-secondary/20"
     >
       <div className="flex items-center gap-3">
@@ -337,7 +347,7 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
       await navigator.clipboard.writeText(text);
       if (type === 'caption') { setCopiedCaption(true); setTimeout(() => setCopiedCaption(false), 2000); }
       else { setCopiedHashtags(true); setTimeout(() => setCopiedHashtags(false), 2000); }
-    } catch { /* ignore */ }
+    } catch { }
   };
 
   const handleDelete = async () => {
@@ -356,7 +366,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
         exit={{ opacity: 0, scale: 0.95 }}
         className="glass rounded-2xl md:rounded-3xl border border-white/5 overflow-hidden flex flex-col"
       >
-        {/* Thumbnail */}
         <div className="relative bg-surface-lighter overflow-hidden group" style={{ aspectRatio: '9/16', maxHeight: '220px' }}>
           {post.thumbnail_url ? (
             <img src={post.thumbnail_url} alt="" className="w-full h-full object-cover" />
@@ -365,7 +374,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
               <Film className="text-white/10" size={36} />
             </div>
           )}
-
           {!isReady && (
             <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2">
               <Loader2 size={22} className="text-brand-secondary animate-spin" />
@@ -374,7 +382,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
               </span>
             </div>
           )}
-
           {isReady && post.video_url && (
             <button
               onClick={() => setShowPlayer(true)}
@@ -385,7 +392,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
               </div>
             </button>
           )}
-
           <div className="absolute top-2 left-2">
             <span className={`text-[9px] px-2 py-0.5 rounded-full border font-mono uppercase tracking-wider ${STATUS_STYLES[post.status] || STATUS_STYLES.pending}`}>
               {post.status}
@@ -393,13 +399,11 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
           </div>
         </div>
 
-        {/* Info */}
         <div className="p-4 flex-1 flex flex-col gap-3">
           <div>
             <p className="font-semibold text-sm line-clamp-2 leading-snug">{post.title || post.topic || 'Generating...'}</p>
             <p className="text-[10px] text-white/30 font-mono mt-1 uppercase tracking-wider">{post.niche || '—'}</p>
           </div>
-
           {post.caption && (
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
@@ -409,7 +413,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
               <p className="text-xs text-white/70 line-clamp-3 leading-relaxed bg-white/5 rounded-xl px-3 py-2">{post.caption}</p>
             </div>
           )}
-
           {post.hashtags && (
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
@@ -419,8 +422,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
               <p className="text-[10px] text-brand-secondary/70 line-clamp-2 leading-relaxed bg-brand-secondary/5 rounded-xl px-3 py-2 font-mono">{post.hashtags}</p>
             </div>
           )}
-
-          {/* Actions */}
           <div className="flex items-center gap-1.5 pt-1 mt-auto flex-wrap">
             {post.video_url && isReady && (
               <button
@@ -470,7 +471,6 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
         </div>
       </motion.div>
 
-      {/* Video Player Modal */}
       <AnimatePresence>
         {showPlayer && post.video_url && (
           <motion.div
@@ -512,6 +512,213 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
   );
 }
 
+// ─── Job Row ──────────────────────────────────────────────────────────────────
+
+function JobRow({
+  job,
+  onDelete,
+  onSaveEdit,
+}: {
+  job: ManualJob;
+  onDelete: (id: string) => void;
+  onSaveEdit: (id: string, patch: { scheduled_time?: string; niche?: string }) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTime, setEditTime] = useState('');
+  const [editIsAuto, setEditIsAuto] = useState(true);
+  const [editNiche, setEditNiche] = useState(NICHES[0]);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const instant = isInstantJob(job);
+  const isEditable = job.status === 'pending' && !instant;
+
+  const startEdit = () => {
+    if (!job.scheduled_time) return;
+    const d = new Date(job.scheduled_time);
+    setEditTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+    setEditIsAuto(job.niche === 'AUTO');
+    setEditNiche(job.niche === 'AUTO' ? NICHES[0] : job.niche);
+    setIsEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editTime) return;
+    setSaving(true);
+    try {
+      const d = new Date(job.scheduled_time || new Date());
+      const [h, m] = editTime.split(':').map(Number);
+      d.setHours(h, m, 0, 0);
+      if (d < new Date()) d.setDate(d.getDate() + 1);
+      await onSaveEdit(job.id, {
+        scheduled_time: d.toISOString(),
+        niche: editIsAuto ? 'AUTO' : editNiche,
+      });
+      setIsEditing(false);
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try { await onDelete(job.id); } finally { setDeleting(false); }
+  };
+
+  return (
+    <motion.div layout className="p-4 md:p-5">
+      {isEditing ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-mono tracking-widest text-white/30">New Time</label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="time"
+                  value={editTime}
+                  onChange={e => setEditTime(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-3 text-sm focus:outline-none focus:border-brand-primary/50"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-mono tracking-widest text-white/30">Niche / Mode</label>
+              <select
+                value={editIsAuto ? 'AUTO' : editNiche}
+                onChange={e => {
+                  if (e.target.value === 'AUTO') { setEditIsAuto(true); }
+                  else { setEditIsAuto(false); setEditNiche(e.target.value); }
+                }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-3 text-sm focus:outline-none focus:border-brand-primary/50 appearance-none"
+              >
+                <option value="AUTO" className="bg-surface">Auto Mode</option>
+                {NICHES.map(n => <option key={n} value={n} className="bg-surface">{n}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={saveEdit}
+              disabled={saving || !editTime}
+              className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl tiktok-gradient text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+            <button
+              onClick={() => setIsEditing(false)}
+              className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-sm font-medium flex items-center justify-center gap-2 transition-all"
+            >
+              <X size={14} /> Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className="p-2 rounded-xl bg-white/5 shrink-0 mt-0.5">
+              {job.status === 'running'
+                ? <Loader2 size={14} className="text-blue-400 animate-spin" />
+                : job.status === 'success'
+                  ? <CheckCircle size={14} className="text-green-400" />
+                  : job.status === 'failed'
+                    ? <AlertCircle size={14} className="text-red-400" />
+                    : instant
+                      ? <Zap size={14} className="text-brand-primary" />
+                      : <Calendar size={14} className="text-brand-secondary" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Job type badge */}
+                <span className={`text-[9px] px-2 py-0.5 rounded-full border font-mono uppercase tracking-widest font-bold ${
+                  instant
+                    ? 'bg-brand-primary/10 text-brand-primary border-brand-primary/20'
+                    : 'bg-brand-secondary/10 text-brand-secondary border-brand-secondary/20'
+                }`}>
+                  {instant ? '⚡ Instant' : '📅 Scheduled'}
+                </span>
+                {/* Status badge */}
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border font-mono uppercase tracking-wider ${STATUS_STYLES[job.status] || STATUS_STYLES.pending}`}>
+                  {job.status}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                {/* Time info */}
+                {!instant && job.scheduled_time && (
+                  <span className="flex items-center gap-1 text-xs text-white/60 font-mono">
+                    <Clock size={10} /> {fmtDateTime(job.scheduled_time)}
+                  </span>
+                )}
+                {instant && job.created_at && (
+                  <span className="text-xs text-white/40 font-mono">
+                    {fmtRelative(job.created_at)}
+                  </span>
+                )}
+                {/* Niche */}
+                <span className="text-xs text-white/40 truncate max-w-[180px]">
+                  {job.niche === 'AUTO' ? '✦ Auto Mode' : job.niche}
+                </span>
+                {/* Execution time */}
+                {job.execution_time_ms && job.execution_time_ms > 0 && (
+                  <span className="flex items-center gap-1 text-[10px] text-white/20 font-mono">
+                    <Timer size={10} /> {fmtExecTime(job.execution_time_ms)}
+                  </span>
+                )}
+                {/* Last topic */}
+                {job.last_topic && (
+                  <span className="text-[10px] text-white/30 font-mono truncate max-w-[200px]" title={job.last_topic}>
+                    "{job.last_topic}"
+                  </span>
+                )}
+              </div>
+
+              {/* Error message */}
+              {job.last_error && (
+                <p className="text-[10px] text-red-400/70 mt-1 truncate flex items-center gap-1">
+                  <AlertCircle size={10} className="shrink-0" /> {job.last_error}
+                </p>
+              )}
+
+              {/* Created at */}
+              {job.created_at && (
+                <p className="text-[10px] text-white/15 font-mono mt-0.5">
+                  Created {fmtRelative(job.created_at)}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isEditable && (
+              <button
+                onClick={startEdit}
+                className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all"
+                title="Edit scheduled time"
+              >
+                <Edit2 size={14} />
+              </button>
+            )}
+            {job.status === 'pending' && (
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="p-2 rounded-lg bg-white/5 hover:bg-red-500/10 text-white/30 hover:text-red-400 transition-all shrink-0 disabled:opacity-30"
+                title="Cancel job"
+              >
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ManualGenerate() {
@@ -524,6 +731,7 @@ export default function ManualGenerate() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successMode, setSuccessMode] = useState<'now' | 'schedule'>('now');
 
   const [jobs, setJobs] = useState<ManualJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
@@ -560,19 +768,19 @@ export default function ManualGenerate() {
   const loadJobs = useCallback(async () => {
     if (!userId) { setJobsLoading(false); return; }
     try { const data = await fetchManualJobs(userId); setJobs(data); }
-    catch { /* ignore */ } finally { setJobsLoading(false); }
+    catch { } finally { setJobsLoading(false); }
   }, [userId]);
 
   const loadPosts = useCallback(async () => {
     if (!userId) { setPostsLoading(false); return; }
     try { const data = await fetchTodaysManualPosts(userId); setPosts(data); }
-    catch { /* ignore */ } finally { setPostsLoading(false); }
+    catch { } finally { setPostsLoading(false); }
   }, [userId]);
 
   const loadNotifications = useCallback(async () => {
     if (!userId) return;
     try { const data = await fetchNotifications(userId); setNotifications(data); }
-    catch { /* ignore */ }
+    catch { }
   }, [userId]);
 
   useEffect(() => {
@@ -625,9 +833,10 @@ export default function ManualGenerate() {
 
       await createManualJob({ userId, scheduledTime, niche: isAutoNiche ? 'AUTO' : selectedNiche });
 
+      setSuccessMode(mode);
       setShowSuccess(true);
       setTime('');
-      setTimeout(() => setShowSuccess(false), 2500);
+      setTimeout(() => setShowSuccess(false), 3000);
     } catch (err) {
       setError((err as Error).message || 'Failed to create job. Please try again.');
     } finally {
@@ -638,6 +847,11 @@ export default function ManualGenerate() {
   const handleDeleteJob = async (id: string) => {
     try { await deleteManualJob(id); setJobs(prev => prev.filter(j => j.id !== id)); }
     catch (err) { alert((err as Error).message); }
+  };
+
+  const handleSaveEditJob = async (id: string, patch: { scheduled_time?: string; niche?: string }) => {
+    await updateManualJob(id, patch);
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, ...patch } : j));
   };
 
   const handleDeletePost = async (id: string) => {
@@ -661,6 +875,8 @@ export default function ManualGenerate() {
   };
 
   const activeJobs = jobs.filter(j => j.status === 'pending' || j.status === 'running');
+  const instantJobs = jobs.filter(j => isInstantJob(j));
+  const scheduledJobs = jobs.filter(j => !isInstantJob(j));
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 md:space-y-10">
@@ -669,7 +885,7 @@ export default function ManualGenerate() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Manual Video Generation</h1>
-          <p className="text-white/40 text-sm md:text-base">Generate videos instantly or on schedule — without auto-publishing to TikTok.</p>
+          <p className="text-white/40 text-sm md:text-base">Generate videos instantly or schedule them — without auto-publishing to TikTok.</p>
         </div>
 
         {/* Notification Bell */}
@@ -699,10 +915,10 @@ export default function ManualGenerate() {
         </div>
       </div>
 
-      {/* Push Notification Subscription Banner */}
+      {/* Push Notification Banner */}
       {userId && <PushSubscriptionBanner userId={userId} />}
 
-      {/* Active jobs status */}
+      {/* Active jobs status banner */}
       <AnimatePresence>
         {activeJobs.length > 0 && (
           <motion.div
@@ -720,8 +936,8 @@ export default function ManualGenerate() {
               : <Activity size={16} className="shrink-0" />}
             <span>
               {activeJobs.some(j => j.status === 'running')
-                ? 'Generating video — pipeline is running now'
-                : `${activeJobs.length} job${activeJobs.length > 1 ? 's' : ''} queued — will generate at the scheduled time`}
+                ? `Generating video — pipeline is running now (${activeJobs.filter(j => j.status === 'running').length} active)`
+                : `${activeJobs.length} job${activeJobs.length > 1 ? 's' : ''} queued — pipeline runs every 10 minutes`}
             </span>
           </motion.div>
         )}
@@ -835,75 +1051,59 @@ export default function ManualGenerate() {
         </div>
       </form>
 
-      {/* Jobs list */}
+      {/* Generation Jobs — split into Instant and Scheduled sections */}
       {(jobsLoading || jobs.length > 0) && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl md:text-2xl font-bold tracking-tight">Generation Jobs</h2>
             <button onClick={loadJobs} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/30 hover:text-white transition-all">
               <RefreshCw size={14} />
             </button>
           </div>
-          <div className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
-            {jobsLoading ? (
-              <div className="p-8 text-center text-white/20 text-sm flex items-center justify-center gap-2">
-                <Loader2 size={16} className="animate-spin" /> Loading jobs…
-              </div>
-            ) : (
-              <div className="divide-y divide-white/5">
-                {jobs.map(job => (
-                  <motion.div key={job.id} layout className="p-4 md:p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-start gap-3 min-w-0 flex-1">
-                        <div className="p-2 rounded-xl bg-white/5 shrink-0 mt-0.5">
-                          {job.status === 'running' ? <Loader2 size={14} className="text-blue-400 animate-spin" />
-                            : job.status === 'success' ? <CheckCircle size={14} className="text-green-400" />
-                            : job.status === 'failed' ? <AlertCircle size={14} className="text-red-400" />
-                            : <Video size={14} className="text-white/40" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-sm">{fmtTime(job.scheduled_time || job.created_at || '')}</span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full border font-mono uppercase tracking-wider ${STATUS_STYLES[job.status] || STATUS_STYLES.pending}`}>
-                              {job.status}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 mt-1 flex-wrap">
-                            <span className="text-xs text-white/40 truncate max-w-[200px]">
-                              {job.niche === 'AUTO' ? '✦ Auto Mode' : job.niche}
-                            </span>
-                            {job.execution_time_ms && job.execution_time_ms > 0 && (
-                              <span className="flex items-center gap-1 text-[10px] text-white/20 font-mono">
-                                <Timer size={10} /> {fmtExecTime(job.execution_time_ms)}
-                              </span>
-                            )}
-                            {job.last_topic && (
-                              <span className="text-[10px] text-white/30 font-mono truncate max-w-[180px]">{job.last_topic}</span>
-                            )}
-                          </div>
-                          {job.last_error && (
-                            <p className="text-[10px] text-red-400/70 mt-1 truncate">{job.last_error}</p>
-                          )}
-                        </div>
-                      </div>
-                      {job.status === 'pending' && (
-                        <button
-                          onClick={() => handleDeleteJob(job.id)}
-                          className="p-2 rounded-lg bg-white/5 hover:bg-red-500/10 text-white/30 hover:text-red-400 transition-all shrink-0"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </div>
+
+          {jobsLoading ? (
+            <div className="glass rounded-2xl border border-white/5 p-8 text-center text-white/20 text-sm flex items-center justify-center gap-2">
+              <Loader2 size={16} className="animate-spin" /> Loading jobs…
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Instant jobs */}
+              {instantJobs.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <Zap size={13} className="text-brand-primary" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-brand-primary font-mono">Instant Jobs</span>
+                    <span className="text-[10px] text-white/20 font-mono">({instantJobs.length})</span>
+                  </div>
+                  <div className="glass rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
+                    {instantJobs.map(job => (
+                      <JobRow key={job.id} job={job} onDelete={handleDeleteJob} onSaveEdit={handleSaveEditJob} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Scheduled jobs */}
+              {scheduledJobs.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <Calendar size={13} className="text-brand-secondary" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-brand-secondary font-mono">Scheduled Jobs</span>
+                    <span className="text-[10px] text-white/20 font-mono">({scheduledJobs.length})</span>
+                  </div>
+                  <div className="glass rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
+                    {scheduledJobs.map(job => (
+                      <JobRow key={job.id} job={job} onDelete={handleDeleteJob} onSaveEdit={handleSaveEditJob} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Today's Videos */}
+      {/* Today's Generated Videos */}
       <div className="space-y-4 md:space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -946,28 +1146,33 @@ export default function ManualGenerate() {
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm px-6"
           >
             <div className="glass rounded-[40px] p-10 md:p-12 text-center border border-white/10 max-w-sm w-full shadow-2xl">
-              <div className="w-16 h-16 md:w-20 md:h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CheckCircle className="text-green-500" size={36} />
+              <div className={`w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${successMode === 'now' ? 'bg-brand-primary/20' : 'bg-brand-secondary/20'}`}>
+                {successMode === 'now'
+                  ? <Zap className="text-brand-primary" size={36} />
+                  : <Calendar className="text-brand-secondary" size={36} />}
               </div>
-              <h3 className="text-xl md:text-2xl font-bold mb-2">
-                {mode === 'now' ? 'Generation Started!' : 'Generation Scheduled!'}
-              </h3>
-              <p className="text-white/40 text-sm">
-                {mode === 'now'
-                  ? "Your video is being generated. You'll be notified when it's ready."
-                  : 'The pipeline will generate your video at the set time.'}
-              </p>
+              {successMode === 'now' ? (
+                <>
+                  <h3 className="text-xl md:text-2xl font-bold mb-2">Generation Queued!</h3>
+                  <p className="text-white/40 text-sm">Your video will be generated by the pipeline. Real-time updates will appear in the jobs list above.</p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-xl md:text-2xl font-bold mb-2">Generation Scheduled!</h3>
+                  <p className="text-white/40 text-sm">Your video will be generated at the scheduled time. You can edit or cancel it from the jobs list.</p>
+                </>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Toasts */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 pointer-events-none">
+      {/* Toast notifications */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
         <AnimatePresence>
-          {toasts.map(toast => (
-            <div key={toast.id} className="pointer-events-auto">
-              <ToastItem toast={toast} onDismiss={dismissToast} />
+          {toasts.map(t => (
+            <div key={t.id} className="pointer-events-auto">
+              <ToastItem toast={t} onDismiss={dismissToast} />
             </div>
           ))}
         </AnimatePresence>

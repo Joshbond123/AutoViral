@@ -6,6 +6,10 @@ on:
   repository_dispatch:
     types: [manual_generate]
   workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Specific manual_job ID to process immediately'
+        required: false
 
 jobs:
   generate:
@@ -40,4 +44,12 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/manual-automate.ts
+        run: |
+          JOB_ID="${{ github.event.client_payload.job_id }}${{ github.event.inputs.job_id }}"
+          if [ -n "$JOB_ID" ]; then
+            echo "Running specific job: $JOB_ID"
+            npx tsx scripts/manual-automate.ts --job-id "$JOB_ID"
+          else
+            echo "Running all pending jobs"
+            npx tsx scripts/manual-automate.ts
+          fi

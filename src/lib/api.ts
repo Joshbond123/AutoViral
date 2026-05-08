@@ -175,6 +175,12 @@ export async function deleteManualJob(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+export async function updateManualJob(id: string, patch: { scheduled_time?: string; niche?: string }): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase.from('manual_jobs').update(patch).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 export function subscribeToManualJobs(userId: string, callback: (job: ManualJob) => void): (() => void) {
   if (!supabase) return () => {};
   const channel = supabase

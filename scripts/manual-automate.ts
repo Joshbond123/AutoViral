@@ -129,12 +129,12 @@ The title should be dramatic, specific, and educational (warning people about sc
 AVOID these already-used topics: ${used.slice(0, 40).join(' | ')}
 Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 
-  return tryWithKeys('cerebras', async (key) => {
-    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+  return tryWithKeys('openai', async (key) => {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama3.1-8b',
+        model: 'gpt-oss-120b',
         max_tokens: 80,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -183,12 +183,12 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
   ]
 }`;
 
-  return tryWithKeys('cerebras', async (key) => {
-    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+  return tryWithKeys('openai', async (key) => {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama3.3-70b',
+        model: 'gpt-oss-120b',
         max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -285,12 +285,12 @@ Return ONLY valid JSON, no markdown, no explanation:
 }`;
 
   try {
-    return await tryWithKeys('cerebras', async (key) => {
-      const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    return await tryWithKeys('openai', async (key) => {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama3.1-8b',
+          model: 'gpt-oss-120b',
           max_tokens: 400,
           messages: [{ role: 'user', content: prompt }],
         }),
@@ -833,7 +833,7 @@ async function main(): Promise<void> {
     .neq('status', 'failed');
 
   const servicesPresent = new Set((activeKeys ?? []).map((k: any) => k.service));
-  const required = ['cerebras', 'cloudflare', 'cloudflare_id', 'unrealspeech'];
+  const required = ['openai', 'cloudflare', 'cloudflare_id', 'unrealspeech'];
   const missing = required.filter(s => !servicesPresent.has(s));
 
   if (missing.length > 0) {

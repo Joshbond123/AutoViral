@@ -1,0 +1,816 @@
+import { createClient } from '@supabase/supabase-js';
+import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { execSync } from 'child_process';
+import { tmpdir } from 'os';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars');
+  process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+const NICHES = [
+  'Daily Crypto Scam',
+  'Crypto Wallet Drain',
+  'Fake Crypto Guru Exposed',
+  'Crypto Investment Scam',
+  'Crypto Scam Psychology',
+  'AI Crypto Scam',
+  'Crypto Romance Scam',
+];
+
+const BACKGROUND_MUSIC_TRACKS = [
+  'https://assets.mixkit.co/music/preview/mixkit-dramatic-mystery-trailer-599.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-news-big-moment-574.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-adventure-awaits-471.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-epic-orchestra-736.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-dark-suspense-tension-583.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-cinematic-tension-pulsing-521.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-inspiring-cinematic-documentary-120.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-deep-urban-623.mp3',
+];
+
+// ─── Key Rotation ─────────────────────────────────────────────────────────────
+
+interface KeyRecord {
+  id: string;
+  key_value: string;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+}
+
+async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>): Promise<T> {
+  const { data: keys } = await supabase
+    .from('api_keys')
+    .select('id, key_value, request_count, success_count, error_count, status')
+    .eq('service', service)
+    .eq('is_active', true)
+    .neq('status', 'failed')
+    .order('request_count', { ascending: true })
+    .order('last_used_at', { ascending: true, nullsFirst: true });
+
+  const pool: KeyRecord[] = keys ?? [];
+  if (pool.length === 0) throw new Error(`No available API keys for service: ${service}`);
+
+  const sorted = [
+    ...pool.filter((k: any) => k.status !== 'rate_limited'),
+    ...pool.filter((k: any) => k.status === 'rate_limited'),
+  ];
+
+  let lastError: Error | null = null;
+
+  for (const key of sorted) {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const result = await fn(key.key_value);
+        await supabase.from('api_keys').update({
+          request_count: key.request_count + 1,
+          success_count: key.success_count + 1,
+          status: 'active',
+          last_used_at: new Date().toISOString(),
+        }).eq('id', key.id);
+        return result;
+      } catch (e: any) {
+        const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic/i.test(e.message ?? '');
+        if (isRateLimit && attempt < maxAttempts) {
+          const delay = attempt * 4000;
+          console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
+          await new Promise(res => setTimeout(res, delay));
+          continue;
+        }
+        await supabase.from('api_keys').update({
+          error_count: key.error_count + 1,
+          request_count: key.request_count + 1,
+          status: isRateLimit ? 'rate_limited' : 'failed',
+          last_used_at: new Date().toISOString(),
+        }).eq('id', key.id);
+        console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] [${service}]: ${isRateLimit ? 'rate_limited' : 'failed'} — ${e.message.slice(0, 120)}`);
+        lastError = e;
+        break;
+      }
+    }
+  }
+
+  throw lastError ?? new Error(`All keys for ${service} exhausted`);
+}
+
+// ─── Topic & Script ───────────────────────────────────────────────────────────
+
+interface ScriptResult {
+  title: string;
+  script: string;
+  scenes: string[];
+}
+
+async function pickUniqueTopic(niche: string): Promise<string> {
+  const { data: history } = await supabase
+    .from('topic_history')
+    .select('topic_title')
+    .eq('niche', niche)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  const used = (history ?? []).map((h: any) => h.topic_title.toLowerCase());
+
+  const prompt = `You are a TikTok content researcher for crypto scam awareness.
+Generate ONE specific, real-sounding viral topic title for the niche: "${niche}".
+The title should be dramatic, specific, and educational (warning people about scams).
+AVOID these already-used topics: ${used.slice(0, 40).join(' | ')}
+Return ONLY the topic title — nothing else, no quotes, no extra text.`;
+
+  return tryWithKeys('cerebras', async (key) => {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3.1-8b',
+        max_tokens: 80,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!resp.ok) throw new Error(`Cerebras topic ${resp.status}: ${await resp.text()}`);
+    const json = await resp.json() as any;
+    const topic = (json.choices?.[0]?.message?.content ?? '').trim().replace(/^["']|["']$/g, '');
+    return topic || `${niche} Warning — ${new Date().toLocaleDateString()}`;
+  });
+}
+
+async function generateScript(topic: string, niche: string): Promise<ScriptResult> {
+  const prompt = `You are a viral TikTok content creator for crypto scam awareness.
+
+Topic: "${topic}"
+Niche: ${niche}
+
+Write a complete TikTok video package. Follow every rule exactly.
+
+VOICEOVER RULES (the "script" field):
+- Pure natural spoken words only — exactly what the narrator says out loud to the camera
+- Start with a shocking hook (alarming question or fact) in the very first sentence
+- 120-150 words total (45-55 seconds when spoken at a normal pace)
+- Direct, personal — use "you", "your", speak to the viewer
+- End with exactly this sentence: "Follow for daily crypto scam warnings."
+- FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
+- Write as ONE continuous paragraph of spoken words — no line breaks, no sections
+
+SCENE RULES (the "scenes" array):
+- Exactly 5 scenes
+- Each is a pure VISUAL description for an AI image generator — describe only what is SEEN
+- NO text, NO words, NO letters, NO numbers anywhere in any scene description
+- NO "Scene 1:" prefix or any labels — just the visual description directly
+- Portrait 9:16 cinematic style, dark dramatic atmosphere
+
+Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
+{
+  "title": "Viral TikTok title, under 80 characters, no emojis",
+  "script": "Pure spoken voiceover paragraph — no labels or directions",
+  "scenes": [
+    "A hooded figure hunched over glowing monitors in a dark room, blue neon light, cinematic portrait",
+    "A close-up of a person's devastated face illuminated by a phone screen, dramatic dark lighting",
+    "Golden coins dissolving into shadow, slow motion, dark cinematic atmosphere, vertical portrait",
+    "Two silhouetted figures exchanging something in a dimly lit alley, suspicious, cinematic",
+    "An empty wallet and a cracked phone screen lying on a dark table, dramatic low lighting"
+  ]
+}`;
+
+  return tryWithKeys('cerebras', async (key) => {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3.1-8b',
+        max_tokens: 1800,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!resp.ok) throw new Error(`Cerebras script ${resp.status}: ${await resp.text()}`);
+    const json = await resp.json() as any;
+    const content = (json.choices?.[0]?.message?.content ?? '').trim();
+
+    try {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        const rawScenes: string[] = Array.isArray(parsed.scenes) ? parsed.scenes : [];
+        const defaultScenes = [
+          `${topic} — shadowy hacker figure at multiple monitors, dark dramatic lighting, cinematic vertical`,
+          `${topic} — crashing red stock charts on screen, person looking shocked, dark office environment`,
+          `${topic} — pile of Bitcoin and dollar bills vanishing, dramatic dark atmosphere, cinematic`,
+          `${topic} — anonymous hooded figure in dimly lit room, suspicious activity, blue neon lighting`,
+          `${topic} — glowing warning signs and digital lock icons, dark background, dramatic cinematic`,
+        ];
+        const scenes = rawScenes.length >= 5 ? rawScenes.slice(0, 5) : [...rawScenes, ...defaultScenes.slice(rawScenes.length)];
+        return { title: (parsed.title || topic).slice(0, 150), script: parsed.script || content, scenes };
+      }
+    } catch { /* fall through */ }
+
+    return {
+      title: topic.slice(0, 150),
+      script: content,
+      scenes: [
+        `${topic} crypto scam warning — shadowy figure at computer, dark dramatic atmosphere, cinematic 9:16`,
+        `${topic} — victim looking at empty crypto wallet on screen, shocked expression, dark room`,
+        `${topic} — anonymous hacker in hoodie with multiple screens, blue neon lighting, dramatic`,
+        `${topic} — digital vault cracking open and disappearing, dark cinematic atmosphere`,
+        `${topic} — person crying while looking at phone with financial loss, dramatic dark lighting`,
+      ],
+    };
+  });
+}
+
+// ─── Caption & Hashtag Generation ─────────────────────────────────────────────
+
+interface CaptionResult {
+  caption: string;
+  hashtags: string;
+}
+
+async function generateCaptionAndHashtags(topic: string, niche: string, title: string, script: string): Promise<CaptionResult> {
+  const scriptPreview = script.slice(0, 250);
+
+  const prompt = `You are a viral TikTok content strategist specializing in crypto scam awareness content.
+
+Create a viral TikTok caption and hashtag set for this video:
+Title: "${title}"
+Topic: "${topic}"
+Niche: "${niche}"
+Script preview: "${scriptPreview}..."
+
+CAPTION RULES:
+- Maximum 150 characters
+- Start with a powerful hook (shocking stat, question, or statement)
+- Include urgency and emotional pull
+- End with a strong CTA ("Follow for more", "Share to warn others", "Save this")
+- No emojis
+- Pure text, highly engaging
+
+HASHTAG RULES:
+- Exactly 12 hashtags
+- Mix of: high-volume TikTok tags, niche-specific tags, and trending crypto/scam awareness tags
+- Include: #cryptoscam #cryptowarning #scamalert and relevant niche tags
+- Format: space-separated on one line
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "caption": "your caption here",
+  "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5 #tag6 #tag7 #tag8 #tag9 #tag10 #tag11 #tag12"
+}`;
+
+  try {
+    return await tryWithKeys('cerebras', async (key) => {
+      const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3.1-8b',
+          max_tokens: 400,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) throw new Error(`Cerebras caption ${resp.status}: ${await resp.text()}`);
+      const json = await resp.json() as any;
+      const content = (json.choices?.[0]?.message?.content ?? '').trim();
+
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        return {
+          caption: (parsed.caption || `${title} - This crypto scam could steal everything from you. Share to protect others. Follow for daily crypto scam warnings.`).slice(0, 150),
+          hashtags: parsed.hashtags || '#cryptoscam #cryptowarning #scamalert #cryptoeducation #cryptosafety #bitcoinscam #cryptofraud #scamexposed #cryptonews #digitalcrime #onlinescam #protectyourself',
+        };
+      }
+      throw new Error('No JSON in response');
+    });
+  } catch (e: any) {
+    console.warn(`  ⚠ Caption generation failed: ${e.message} — using defaults`);
+    return {
+      caption: `${title.slice(0, 100)} - This crypto scam has already stolen millions. Share to warn others. Follow for daily crypto scam warnings.`,
+      hashtags: '#cryptoscam #cryptowarning #scamalert #cryptoeducation #cryptosafety #bitcoinscam #cryptofraud #scamexposed #cryptonews #digitalcrime #onlinescam #protectyourself',
+    };
+  }
+}
+
+// ─── Voiceover ─────────────────────────────────────────────────────────────────
+
+function cleanVoiceoverScript(raw: string): string {
+  return raw
+    .replace(/\[.*?\]/g, '')
+    .replace(/\((?![a-z]'[a-z]).*?\)/gi, '')
+    .replace(/^(scene|script|voiceover|narrator|note|hook|cta|body|intro|outro|title)\s*[\d:.\-]*.*/gim, '')
+    .replace(/^scene\s*\d+.*/gim, '')
+    .replace(/[*_~`#]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 3000);
+}
+
+async function generateVoiceover(script: string): Promise<Buffer> {
+  const cleanScript = cleanVoiceoverScript(script);
+
+  return tryWithKeys('unrealspeech', async (key) => {
+    const resp = await fetch('https://api.v6.unrealspeech.com/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Text: cleanScript,
+        VoiceId: 'Scarlett',
+        Bitrate: '192k',
+        Speed: '-0.1',
+        Pitch: '1.0',
+        Codec: 'libmp3lame',
+        Temperature: '0.3',
+      }),
+    });
+    if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
+
+    const ct = resp.headers.get('content-type') ?? '';
+    if (ct.includes('application/json')) {
+      const json = await resp.json() as any;
+      if (!json.OutputUri) throw new Error(`UnrealSpeech: no OutputUri — ${JSON.stringify(json)}`);
+      console.log(`     → Downloading audio from S3...`);
+      const audioResp = await fetch(json.OutputUri);
+      if (!audioResp.ok) throw new Error(`S3 audio download failed: ${audioResp.status}`);
+      const buf = Buffer.from(await audioResp.arrayBuffer());
+      if (buf.byteLength < 1000) throw new Error(`UnrealSpeech S3 audio empty (${buf.byteLength} bytes)`);
+      return buf;
+    }
+
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.byteLength < 1000) throw new Error(`UnrealSpeech returned empty audio (${buf.byteLength} bytes)`);
+    return buf;
+  });
+}
+
+// ─── Image Generation ──────────────────────────────────────────────────────────
+
+async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
+  const cleanDesc = sceneDesc.replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '').replace(/\[.*?\]/g, '').trim();
+  const prompt = [
+    cleanDesc,
+    'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, cinematic dark dramatic atmosphere, professional photography, photorealistic.',
+    'STRICT: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels, NO signs, NO titles anywhere in the image — pure visual only.',
+    'Do NOT split into panels or multiple images. Single full-frame portrait scene only.',
+    'Do NOT include any writing, typography, or overlaid text of any kind.',
+  ].join(' ');
+
+  return tryWithKeys('cloudflare', async (cfToken) => {
+    const { data: idKeys } = await supabase
+      .from('api_keys')
+      .select('key_value')
+      .eq('service', 'cloudflare_id')
+      .eq('is_active', true)
+      .limit(1)
+      .single();
+    const cfAccountId = idKeys?.key_value;
+    if (!cfAccountId) throw new Error('No Cloudflare Account ID configured');
+
+    const resp = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, num_steps: 8 }),
+      }
+    );
+    if (!resp.ok) throw new Error(`Cloudflare image (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
+
+    const ct = resp.headers.get('content-type') ?? '';
+    if (ct.includes('image/')) {
+      return cropToPortrait(Buffer.from(await resp.arrayBuffer()));
+    }
+    const json = await resp.json() as any;
+    if (json?.result?.image) {
+      return cropToPortrait(Buffer.from(json.result.image, 'base64'));
+    }
+    throw new Error(`Unexpected Cloudflare response for scene ${index + 1}`);
+  });
+}
+
+async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
+  try {
+    const tmpIn = join(tmpdir(), `img_in_${Date.now()}.jpg`);
+    const tmpOut = join(tmpdir(), `img_out_${Date.now()}.jpg`);
+    writeFileSync(tmpIn, imgBuf);
+    execSync(`convert "${tmpIn}" -resize 1080x1920^ -gravity Center -extent 1080x1920 "${tmpOut}"`, { timeout: 15000 });
+    const out = readFileSync(tmpOut);
+    try { execSync(`rm -f "${tmpIn}" "${tmpOut}"`); } catch { /* ignore */ }
+    return out;
+  } catch {
+    return imgBuf;
+  }
+}
+
+// ─── Background Music ──────────────────────────────────────────────────────────
+
+async function downloadBackgroundMusic(tmpDir: string): Promise<string | null> {
+  const trackUrl = BACKGROUND_MUSIC_TRACKS[Math.floor(Math.random() * BACKGROUND_MUSIC_TRACKS.length)];
+  const musicPath = join(tmpDir, 'music.mp3');
+  try {
+    console.log(`     → Downloading background music...`);
+    const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) { console.warn(`     ⚠ Music download failed (${resp.status})`); return null; }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.byteLength < 10000) { console.warn(`     ⚠ Music file too small`); return null; }
+    writeFileSync(musicPath, buf);
+    console.log(`     → Music: ${(buf.byteLength / 1024).toFixed(0)} KB`);
+    return musicPath;
+  } catch (e: any) {
+    console.warn(`     ⚠ Music download error: ${e.message}`);
+    return null;
+  }
+}
+
+// ─── Remotion Video Assembly ───────────────────────────────────────────────────
+
+async function assembleVideoWithRemotion(
+  imagePaths: string[],
+  audioPath: string,
+  musicPath: string | null,
+  outputPath: string,
+  script: string,
+  title: string,
+): Promise<void> {
+  const { bundle } = await import('@remotion/bundler') as any;
+  const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
+
+  const FPS = 30;
+  const OUTRO_SEC = 2.0;
+
+  const audioBytes = readFileSync(audioPath).byteLength;
+  const hasAudio = audioBytes > 1000;
+  let audioDurationSec = 35;
+
+  if (hasAudio) {
+    try {
+      const ffOut = execSync(
+        `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`,
+        { timeout: 12000 }
+      ).toString().trim();
+      const probed = parseFloat(ffOut);
+      if (isFinite(probed) && probed > 3) {
+        audioDurationSec = probed;
+        console.log(`  Audio duration (ffprobe): ${audioDurationSec.toFixed(2)}s`);
+      } else throw new Error('ffprobe returned invalid value');
+    } catch {
+      audioDurationSec = Math.max((audioBytes * 8) / (192 * 1000), 20);
+      console.log(`  Audio duration (estimated): ${audioDurationSec.toFixed(2)}s`);
+    }
+  }
+
+  const totalSec = Math.min(audioDurationSec + OUTRO_SEC, 82);
+  const durationInFrames = Math.ceil(totalSec * FPS);
+  const audioDurationFrames = Math.round(audioDurationSec * FPS);
+  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames`);
+
+  const WORDS_PER_SEC = 2.65;
+  const SUBTITLE_CHUNK = 4;
+  const cleanedScript = cleanVoiceoverScript(script);
+  const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
+
+  const subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
+  for (let i = 0; i < scriptWords.length; i += SUBTITLE_CHUNK) {
+    const chunk = scriptWords.slice(i, i + SUBTITLE_CHUNK);
+    const startSec = i / WORDS_PER_SEC;
+    const endSec = (i + chunk.length) / WORDS_PER_SEC;
+    if (startSec >= audioDurationSec) break;
+    subtitleTimings.push({
+      text: chunk.join(' ').toUpperCase(),
+      startFrame: Math.round(startSec * FPS),
+      endFrame: Math.min(Math.round(endSec * FPS), audioDurationFrames),
+    });
+  }
+
+  const lastTiming = subtitleTimings[subtitleTimings.length - 1];
+  if (lastTiming && lastTiming.endFrame > audioDurationFrames) {
+    const scale = audioDurationFrames / lastTiming.endFrame;
+    for (const t of subtitleTimings) {
+      t.startFrame = Math.round(t.startFrame * scale);
+      t.endFrame = Math.round(t.endFrame * scale);
+    }
+  }
+
+  console.log(`  Subtitle chunks: ${subtitleTimings.length}`);
+  console.log('  Converting assets to data URLs...');
+
+  const scenes = imagePaths.map(p => `data:image/jpeg;base64,${readFileSync(p).toString('base64')}`);
+  const audioSrc = hasAudio ? `data:audio/mpeg;base64,${readFileSync(audioPath).toString('base64')}` : '';
+  let musicSrc = '';
+  if (musicPath) {
+    try { musicSrc = `data:audio/mpeg;base64,${readFileSync(musicPath).toString('base64')}`; } catch { /* skip */ }
+  }
+
+  const inputProps = { scenes, audioSrc, musicSrc, script: cleanedScript, title, durationInFrames, subtitleTimings };
+
+  console.log('  Bundling Remotion composition...');
+  const entryPoint = join(__dirname, 'remotion', 'root.tsx');
+  const bundleLocation = await bundle({ entryPoint, webpackOverride: (cfg: any) => cfg });
+
+  console.log('  Launching Chromium...');
+  await ensureBrowser();
+
+  const composition = await selectComposition({ serveUrl: bundleLocation, id: 'TikTokVideo', inputProps });
+
+  console.log(`  Rendering ${durationInFrames} frames at 1080×1920...`);
+  await renderMedia({
+    composition,
+    serveUrl: bundleLocation,
+    codec: 'h264',
+    outputLocation: outputPath,
+    inputProps,
+    timeoutInMilliseconds: 15 * 60 * 1000,
+    chromiumOptions: { disableWebSecurity: true },
+    onProgress: ({ renderedFrames, totalFrames }: any) => {
+      if (renderedFrames % 150 === 0 || renderedFrames === totalFrames) {
+        console.log(`    ↳ ${renderedFrames}/${totalFrames} frames (${((renderedFrames / totalFrames) * 100).toFixed(0)}%)`);
+      }
+    },
+  });
+}
+
+// ─── Storage Upload ────────────────────────────────────────────────────────────
+
+async function uploadFile(localPath: string, bucketPath: string, mime: string): Promise<string> {
+  const fileData = readFileSync(localPath);
+  const { error } = await supabase.storage
+    .from('videos')
+    .upload(bucketPath, fileData, { contentType: mime, upsert: true });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  const { data } = supabase.storage.from('videos').getPublicUrl(bucketPath);
+  return data.publicUrl;
+}
+
+// ─── Notification Delivery ─────────────────────────────────────────────────────
+
+async function sendNotification(userId: string, title: string, message: string, type: 'success' | 'error' | 'info', postId?: string): Promise<void> {
+  // 1. Insert in-app notification (realtime subscription picks this up)
+  try {
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      title,
+      message,
+      type,
+      read: false,
+      post_id: postId ?? null,
+    });
+    console.log(`  ✉ In-app notification inserted`);
+  } catch (e: any) {
+    console.warn(`  ⚠ Failed to insert notification: ${e.message}`);
+  }
+
+  // 2. Send Web Push notification via edge function
+  try {
+    const funcUrl = `${SUPABASE_URL}/functions/v1/send-push`;
+    const resp = await fetch(funcUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        userId,
+        title,
+        body: message,
+        url: '/AutoViral/manual',
+        postId,
+        tag: 'autoviral-video-ready',
+      }),
+    });
+    const result = await resp.json() as any;
+    if (result.sent > 0) {
+      console.log(`  📲 Push notification sent to ${result.sent} device(s)`);
+    } else if (result.skipped) {
+      console.log(`  ℹ Push notifications not configured (VAPID keys missing)`);
+    } else {
+      console.log(`  ℹ No push subscriptions found for user`);
+    }
+  } catch (e: any) {
+    console.warn(`  ⚠ Failed to send push notification: ${e.message}`);
+  }
+}
+
+// ─── Main Pipeline ─────────────────────────────────────────────────────────────
+
+async function runManualPipeline(job: any): Promise<void> {
+  const startTime = Date.now();
+  const tmpDir = join(tmpdir(), `autoviral_manual_${job.id.slice(0, 8)}_${Date.now()}`);
+  mkdirSync(tmpDir, { recursive: true });
+
+  const niche = job.niche === 'AUTO'
+    ? NICHES[Math.floor(Math.random() * NICHES.length)]
+    : job.niche;
+
+  console.log(`\n▶ Manual Job ${job.id.slice(0, 8)} | niche: ${niche}`);
+
+  await supabase.from('manual_jobs').update({
+    status: 'running',
+    last_run_at: new Date().toISOString(),
+  }).eq('id', job.id);
+
+  const { data: postRow } = await supabase.from('posts').insert({
+    user_id: job.user_id,
+    manual_job_id: job.id,
+    niche,
+    status: 'processing',
+  }).select().single();
+
+  const postId: string | null = postRow?.id ?? null;
+
+  const failJob = async (msg: string) => {
+    const elapsed = Date.now() - startTime;
+    console.error(`  ❌ ${msg}`);
+    if (postId) {
+      await supabase.from('posts').update({ status: 'failed', publish_result: msg }).eq('id', postId);
+    }
+    await supabase.from('manual_jobs').update({
+      status: 'failed',
+      last_error: msg.slice(0, 500),
+      execution_time_ms: elapsed,
+    }).eq('id', job.id);
+
+    await sendNotification(
+      job.user_id,
+      'Video Generation Failed',
+      `Your video generation failed: ${msg.slice(0, 120)}`,
+      'error',
+      postId ?? undefined,
+    );
+  };
+
+  try {
+    // 1. Pick unique topic
+    console.log('  1/8 Researching unique topic...');
+    const topic = await pickUniqueTopic(niche);
+    console.log(`     → "${topic}"`);
+
+    try {
+      await supabase.from('topic_history').upsert({
+        niche,
+        topic_title: topic,
+        topic_hash: Buffer.from(topic.toLowerCase().replace(/\s+/g, '_')).toString('base64').slice(0, 64),
+      });
+    } catch { /* non-critical */ }
+
+    if (postId) await supabase.from('posts').update({ topic, niche }).eq('id', postId);
+
+    // 2. Generate script
+    console.log('  2/8 Generating viral script with 5 scenes...');
+    const { title, script, scenes } = await generateScript(topic, niche);
+    console.log(`     → "${title}" | ${scenes.length} scenes`);
+    if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
+
+    // 3. Generate caption & hashtags (parallel with voiceover prep)
+    console.log('  3/8 Generating viral caption and hashtags...');
+    const { caption, hashtags } = await generateCaptionAndHashtags(topic, niche, title, script);
+    console.log(`     → Caption: "${caption.slice(0, 60)}..."`);
+    console.log(`     → Hashtags: ${hashtags.split(' ').length} tags`);
+    if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
+
+    // 4. Voiceover
+    console.log('  4/8 Generating voiceover (UnrealSpeech)...');
+    const audioBuffer = await generateVoiceover(script);
+    const audioPath = join(tmpDir, 'voice.mp3');
+    writeFileSync(audioPath, audioBuffer);
+    console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB`);
+
+    // 5. Background music
+    console.log('  5/8 Downloading background music...');
+    const musicPath = await downloadBackgroundMusic(tmpDir);
+
+    // 6. Scene images
+    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI)...`);
+    const imagePaths: string[] = [];
+    for (let i = 0; i < scenes.length; i++) {
+      try {
+        const imgBuf = await generateImage(scenes[i], i);
+        const imgPath = join(tmpDir, `scene_${i}.jpg`);
+        writeFileSync(imgPath, imgBuf);
+        imagePaths.push(imgPath);
+        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+      } catch (e: any) {
+        console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message} — using dark fallback`);
+        const placeholderPath = join(tmpDir, `scene_${i}.jpg`);
+        try {
+          execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${placeholderPath}" 2>/dev/null || true`);
+          const fs = await import('fs');
+          if (fs.existsSync(placeholderPath) && fs.statSync(placeholderPath).size > 100) {
+            imagePaths.push(placeholderPath);
+          }
+        } catch { /* skip */ }
+      }
+    }
+
+    if (imagePaths.length === 0) {
+      throw new Error('All scene images failed to generate — cannot create video');
+    }
+    console.log(`     → ${imagePaths.length} of ${scenes.length} scenes ready`);
+
+    // 7. Remotion render
+    console.log('  7/8 Rendering video with Remotion...');
+    const videoPath = join(tmpDir, 'final.mp4');
+    await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title);
+    const videoSize = readFileSync(videoPath).byteLength;
+    console.log(`     → ${(videoSize / (1024 * 1024)).toFixed(1)} MB`);
+
+    // 8. Upload to Supabase Storage (NO TikTok publishing)
+    console.log('  8/8 Uploading to Supabase Storage...');
+    const timestamp = Date.now();
+    const userId = job.user_id;
+    const videoUrl = await uploadFile(videoPath, `manual/${userId}/${timestamp}.mp4`, 'video/mp4');
+    const thumbUrl = await uploadFile(imagePaths[0], `manual-thumbnails/${userId}/${timestamp}.jpg`, 'image/jpeg');
+    console.log(`     → ${videoUrl}`);
+
+    const elapsed = Date.now() - startTime;
+
+    if (postId) {
+      await supabase.from('posts').update({
+        video_url: videoUrl,
+        thumbnail_url: thumbUrl,
+        status: 'rendered',
+        published_at: null,
+      }).eq('id', postId);
+    }
+
+    await supabase.from('manual_jobs').update({
+      status: 'success',
+      last_run_at: new Date().toISOString(),
+      last_topic: topic,
+      last_error: null,
+      execution_time_ms: elapsed,
+    }).eq('id', job.id);
+
+    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — stored: ${videoUrl}`);
+
+    // Send success notification
+    await sendNotification(
+      userId,
+      'Video Ready',
+      `"${title}" has been generated successfully. Caption and hashtags are ready to copy.`,
+      'success',
+      postId ?? undefined,
+    );
+
+  } catch (err: any) {
+    await failJob(err.message ?? String(err));
+  } finally {
+    try { execSync(`rm -rf "${tmpDir}"`); } catch { /* ignore */ }
+  }
+}
+
+// ─── Entry Point ───────────────────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  console.log('🎬 AutoViral Manual Generation Pipeline — ' + new Date().toISOString());
+
+  const { data: activeKeys } = await supabase
+    .from('api_keys')
+    .select('service')
+    .eq('is_active', true)
+    .neq('status', 'failed');
+
+  const servicesPresent = new Set((activeKeys ?? []).map((k: any) => k.service));
+  const required = ['cerebras', 'cloudflare', 'cloudflare_id', 'unrealspeech'];
+  const missing = required.filter(s => !servicesPresent.has(s));
+
+  if (missing.length > 0) {
+    console.error(`❌ Missing API keys in Supabase: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+
+  const { data: jobs, error } = await supabase
+    .from('manual_jobs')
+    .select('*')
+    .eq('status', 'pending')
+    .lte('scheduled_time', new Date().toISOString());
+
+  if (error) {
+    console.error('Failed to fetch manual jobs:', error.message);
+    process.exit(1);
+  }
+
+  if (!jobs || jobs.length === 0) {
+    console.log('✓ No pending manual jobs due right now.');
+    return;
+  }
+
+  console.log(`Found ${jobs.length} manual job(s) to run.`);
+  for (const job of jobs) {
+    await runManualPipeline(job);
+  }
+
+  console.log('\n✅ All manual pipelines complete!');
+}
+
+main().catch(err => {
+  console.error('Fatal:', err);
+  process.exit(1);
+});

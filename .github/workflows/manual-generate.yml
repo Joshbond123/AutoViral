@@ -1,0 +1,43 @@
+name: Manual Video Generate
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  repository_dispatch:
+    types: [manual_generate]
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install Chromium system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+            libpango-1.0-0 libcairo2 libasound2t64 \
+            fonts-liberation fonts-dejavu fontconfig imagemagick
+          fc-cache -f
+
+      - name: Run Manual Generation Pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/manual-automate.ts

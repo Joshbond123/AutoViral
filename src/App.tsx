@@ -7,6 +7,7 @@ import Settings from './pages/Settings';
 import Home from './pages/Home';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import ManualGenerate from './pages/ManualGenerate';
 import { AnimatePresence, motion } from 'motion/react';
 import { Menu } from 'lucide-react';
 
@@ -50,7 +51,6 @@ function AppContent() {
     return () => window.removeEventListener('message', handleAuthMessage);
   }, []);
 
-  // Close sidebar on route change (mobile)
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
@@ -70,7 +70,6 @@ function AppContent() {
     <div className="flex min-h-screen bg-bg-dark text-white selection:bg-brand-primary selection:text-white">
       {!isPublicPage && (
         <>
-          {/* Mobile overlay backdrop */}
           <AnimatePresence>
             {sidebarOpen && (
               <motion.div
@@ -88,7 +87,6 @@ function AppContent() {
 
       <main className={`flex-1 min-w-0 transition-all duration-500 ${!isPublicPage ? 'md:pl-64' : ''}`}>
         {!isPublicPage && (
-          /* Mobile top bar */
           <div className="flex items-center gap-4 px-4 py-4 border-b border-white/5 bg-surface md:hidden">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -114,6 +112,7 @@ function AppContent() {
                 <Route path="/terms" element={<Terms />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/schedule" element={<Schedule />} />
+                <Route path="/manual" element={<ManualGenerate />} />
                 <Route path="/history" element={<Dashboard />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>

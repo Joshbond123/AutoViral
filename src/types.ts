@@ -11,13 +11,17 @@ export interface Post {
   id: string;
   user_id: string;
   schedule_id?: string;
+  manual_job_id?: string;
   thumbnail_url?: string;
   title?: string;
   topic?: string;
   niche?: string;
   script?: string;
+  caption?: string;
+  hashtags?: string;
   status: 'pending' | 'processing' | 'rendered' | 'published' | 'failed';
   published_at?: string;
+  created_at?: string;
   duration?: string;
   video_url?: string;
   publish_result?: string;
@@ -36,6 +40,30 @@ export interface Schedule {
   last_topic?: string;
   last_error?: string;
   execution_time_ms?: number;
+}
+
+export interface ManualJob {
+  id: string;
+  user_id: string;
+  scheduled_time: string | null;
+  niche: string;
+  status: 'pending' | 'running' | 'success' | 'failed';
+  created_at?: string;
+  last_run_at?: string;
+  last_topic?: string;
+  last_error?: string;
+  execution_time_ms?: number;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'error';
+  read: boolean;
+  post_id?: string;
+  created_at: string;
 }
 
 export interface ApiKey {

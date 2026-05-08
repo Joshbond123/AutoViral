@@ -732,6 +732,8 @@ export default function ManualGenerate() {
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMode, setSuccessMode] = useState<'now' | 'schedule'>('now');
+  const [dispatchedNow, setDispatchedNow] = useState(false);
+  const dispatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [jobs, setJobs] = useState<ManualJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
@@ -831,12 +833,18 @@ export default function ManualGenerate() {
         scheduledTime = dt.toISOString();
       }
 
-      await createManualJob({ userId, scheduledTime, niche: isAutoNiche ? 'AUTO' : selectedNiche });
+      const { dispatched } = await createManualJob({ userId, scheduledTime, niche: isAutoNiche ? 'AUTO' : selectedNiche });
 
       setSuccessMode(mode);
       setShowSuccess(true);
       setTime('');
       setTimeout(() => setShowSuccess(false), 3000);
+
+      if (dispatched) {
+        setDispatchedNow(true);
+        if (dispatchTimerRef.current) clearTimeout(dispatchTimerRef.current);
+        dispatchTimerRef.current = setTimeout(() => setDispatchedNow(false), 90_000);
+      }
     } catch (err) {
       setError((err as Error).message || 'Failed to create job. Please try again.');
     } finally {
@@ -918,9 +926,9 @@ export default function ManualGenerate() {
       {/* Push Notification Banner */}
       {userId && <PushSubscriptionBanner userId={userId} />}
 
-      {/* Active jobs status banner */}
+      {/* Active jobs / dispatch status banner */}
       <AnimatePresence>
-        {activeJobs.length > 0 && (
+        {(activeJobs.length > 0 || dispatchedNow) && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -928,16 +936,22 @@ export default function ManualGenerate() {
             className={`flex items-center gap-3 px-5 py-4 rounded-2xl border text-sm ${
               activeJobs.some(j => j.status === 'running')
                 ? 'bg-blue-500/10 border-blue-500/20 text-blue-300'
-                : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300'
+                : dispatchedNow
+                  ? 'bg-green-500/10 border-green-500/20 text-green-300'
+                  : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300'
             }`}
           >
             {activeJobs.some(j => j.status === 'running')
               ? <Loader2 size={16} className="animate-spin shrink-0" />
-              : <Activity size={16} className="shrink-0" />}
+              : dispatchedNow
+                ? <Zap size={16} className="shrink-0" />
+                : <Activity size={16} className="shrink-0" />}
             <span>
               {activeJobs.some(j => j.status === 'running')
                 ? `Generating video — pipeline is running now (${activeJobs.filter(j => j.status === 'running').length} active)`
-                : `${activeJobs.length} job${activeJobs.length > 1 ? 's' : ''} queued — pipeline runs every 10 minutes`}
+                : dispatchedNow
+                  ? 'Pipeline triggered! GitHub Actions is starting — your video will generate in ~1–2 minutes.'
+                  : `${activeJobs.length} job${activeJobs.length > 1 ? 's' : ''} queued — pipeline picks up in ≤10 minutes`}
             </span>
           </motion.div>
         )}

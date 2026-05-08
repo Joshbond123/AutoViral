@@ -880,8 +880,7 @@ async function main(): Promise<void> {
     await runManualPipeline(job);
   }
 
-  console.log('
-✅ All manual pipelines complete!');
+  console.log('\n✅ All manual pipelines complete!');
 }
 main().catch(err => {
   console.error('Fatal:', err);

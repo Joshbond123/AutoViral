@@ -132,7 +132,9 @@ export function subscribeToPosts(userId: string, callback: (post: Post) => void)
 
 // ─── Manual Job API ────────────────────────────────────────────────────────────
 
-export async function createManualJob(input: { userId: string; scheduledTime: string | null; niche: string }): Promise<ManualJob> {
+export async function createManualJob(
+  input: { userId: string; scheduledTime: string | null; niche: string }
+): Promise<{ job: ManualJob; dispatched: boolean }> {
   if (!supabase) throw new Error('Supabase not configured');
   const { data, error } = await supabase
     .from('manual_jobs')
@@ -146,15 +148,22 @@ export async function createManualJob(input: { userId: string; scheduledTime: st
     .single();
   if (error) throw new Error(error.message);
 
-  if (FUNCS_BASE) {
-    fetch(`${FUNCS_BASE}/manual-trigger`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: input.userId, jobId: (data as ManualJob).id, instant: !input.scheduledTime }),
-    }).catch(() => {});
+  const isInstant = !input.scheduledTime;
+  let dispatched = false;
+
+  if (FUNCS_BASE && isInstant) {
+    try {
+      const res = await fetch(`${FUNCS_BASE}/manual-trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: input.userId, jobId: (data as ManualJob).id, instant: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      dispatched = json?.dispatched === true;
+    } catch { /* Non-fatal — cron will pick up the job */ }
   }
 
-  return data as ManualJob;
+  return { job: data as ManualJob, dispatched };
 }
 
 export async function fetchManualJobs(userId: string): Promise<ManualJob[]> {

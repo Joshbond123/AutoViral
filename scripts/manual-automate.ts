@@ -188,7 +188,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b',
+        model: 'llama3.3-70b',
         max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -352,7 +352,6 @@ function cleanVoiceoverScript(raw: string): string {
       return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
     }
     return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. Follow for daily crypto scam warnings.';
-  }
 }
 
 async function generateVoiceover(script: string): Promise<Buffer> {

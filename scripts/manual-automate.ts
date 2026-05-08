@@ -210,9 +210,27 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
           `${topic} — glowing warning signs and digital lock icons, dark background, dramatic cinematic`,
         ];
         const scenes = rawScenes.length >= 5 ? rawScenes.slice(0, 5) : [...rawScenes, ...defaultScenes.slice(rawScenes.length)];
-        return { title: (parsed.title || topic).slice(0, 150), script: parsed.script || content, scenes };
-      }
-    } catch { /* fall through */ }
+        // Strictly validate the script field before using it
+          let _scriptText = '';
+          if (
+            typeof parsed.script === 'string' &&
+            parsed.script.trim().length >= 60 &&
+            !parsed.script.includes('{') &&
+            !parsed.script.includes('"scenes"') &&
+            !/^(Scene|Voiceover|Script|Title|Narrator)\s*\d*\s*:/im.test(parsed.script)
+          ) {
+            _scriptText = parsed.script.trim();
+          } else {
+            const _candidates = content.split(/\n+/).map((l: string) => l.trim()).filter((l: string) =>
+              l.length > 60 && !l.startsWith('"') && !l.includes('://') &&
+              !l.includes('{') && !/{\s*"/.test(l) && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l)
+            );
+            _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
+              || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. Protect your assets. Follow for daily crypto scam warnings.`;
+          }
+          return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
+        }
+      } catch { /* fall through */ }
 
     return {
       title: topic.slice(0, 150),

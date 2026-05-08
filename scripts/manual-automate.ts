@@ -134,7 +134,7 @@ Return ONLY the topic title — nothing else, no quotes, no extra text.`;
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss-120b',
+        model: 'qwen-3-235b-a22b-instruct-2507',
         max_tokens: 80,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -188,7 +188,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss-120b',
+        model: 'qwen-3-235b-a22b-instruct-2507',
         max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -290,7 +290,7 @@ Return ONLY valid JSON, no markdown, no explanation:
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-oss-120b',
+          model: 'qwen-3-235b-a22b-instruct-2507',
           max_tokens: 400,
           messages: [{ role: 'user', content: prompt }],
         }),

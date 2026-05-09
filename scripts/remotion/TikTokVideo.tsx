@@ -206,11 +206,21 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   const { fps } = useVideoConfig();
 
   // ── Timing ─────────────────────────────────────────────────────────────────
-  const OUTRO_FRAMES = Math.round(5.0 * fps);
+  const OUTRO_FRAMES = Math.round(8.0 * fps);
   const audioDurationFrames = audioDurationFramesProp
-    ?? Math.max(durationInFrames - OUTRO_FRAMES, Math.round(durationInFrames * 0.88));
+    ?? Math.max(durationInFrames - OUTRO_FRAMES, Math.round(durationInFrames * 0.85));
 
   const isOutro = frame >= audioDurationFrames;
+
+  // Smooth content fade-out: start 24 frames (0.8s) before outro kicks in
+  const CONTENT_FADE_OUT = 24;
+  const contentFadeStart = audioDurationFrames - CONTENT_FADE_OUT;
+  const contentOpacity = isOutro
+    ? 0
+    : interpolate(frame, [contentFadeStart, audioDurationFrames], [1, 0], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      });
 
   // ── Scene Management ───────────────────────────────────────────────────────
   const sceneCount = Math.max(scenes.length, 1);
@@ -262,7 +272,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
 
   // ── Global Fade ────────────────────────────────────────────────────────────
   const globalFadeIn = interpolate(frame, [0, 12], [0, 1], { extrapolateRight: 'clamp' });
-  const globalFadeOut = interpolate(frame, [durationInFrames - 10, durationInFrames - 1], [1, 0], {
+  const globalFadeOut = interpolate(frame, [durationInFrames - 20, durationInFrames - 2], [1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
@@ -322,7 +332,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
 
       {/* SCAM ALERT badge */}
       {!isOutro && (
-        <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '52px 44px 0' }}>
+        <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '52px 44px 0', opacity: contentOpacity }}>
           <div style={{
             background: 'rgba(214,24,0,0.95)',
             borderRadius: 10,
@@ -350,7 +360,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
 
       {/* Title */}
       {!isOutro && (
-        <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '158px 44px 0' }}>
+        <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: '158px 44px 0', opacity: contentOpacity }}>
           <p style={{
             fontSize: 42,
             fontWeight: 900,
@@ -377,7 +387,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
         >
           <div
             style={{
-              opacity: wordOpacity,
+              opacity: wordOpacity * contentOpacity,
               transform: `scale(${wordScale}) translateY(${wordDrift}px)`,
               textAlign: 'center',
               display: 'flex',
@@ -418,7 +428,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
 
       {/* FOLLOW CTA button */}
       {!isOutro && (
-        <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', padding: '0 44px 110px' }}>
+        <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', padding: '0 44px 110px', opacity: contentOpacity }}>
           <div style={{
             background: 'linear-gradient(135deg, #fe2c55 0%, #b01e3c 100%)',
             borderRadius: 100,

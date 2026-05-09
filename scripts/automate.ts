@@ -29,14 +29,22 @@ const NICHES = [
 ];
 
 const BACKGROUND_MUSIC_TRACKS = [
+  // Dark / thriller — high impact
   'https://assets.mixkit.co/music/preview/mixkit-dramatic-mystery-trailer-599.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-news-big-moment-574.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-adventure-awaits-471.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-epic-orchestra-736.mp3',
   'https://assets.mixkit.co/music/preview/mixkit-dark-suspense-tension-583.mp3',
   'https://assets.mixkit.co/music/preview/mixkit-cinematic-tension-pulsing-521.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-news-big-moment-574.mp3',
+  // Epic / cinematic
+  'https://assets.mixkit.co/music/preview/mixkit-epic-orchestra-736.mp3',
   'https://assets.mixkit.co/music/preview/mixkit-inspiring-cinematic-documentary-120.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-adventure-awaits-471.mp3',
+  // Urban / modern
   'https://assets.mixkit.co/music/preview/mixkit-deep-urban-623.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-hip-hop-02-738.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3',
+  // Emotional / documentary
+  'https://assets.mixkit.co/music/preview/mixkit-piano-reflections-22.mp3',
+  'https://assets.mixkit.co/music/preview/mixkit-life-is-a-dream-837.mp3',
 ];
 
 // ─── Key Rotation System ───────────────────────────────────────────────────────
@@ -376,7 +384,7 @@ async function generateVoiceoverWithTimestamps(script: string): Promise<Voiceove
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         Text: cleanScript,
-        VoiceId: 'Scarlett',
+        VoiceId: 'Will',
         Bitrate: '192k',
         TimestampType: 'word',
       }),
@@ -444,7 +452,7 @@ async function generateVoiceoverWithTimestamps(script: string): Promise<Voiceove
 function buildSubtitleTimingsFromWords(
   words: WordTimestamp[],
   fps: number,
-  chunkSize: number = 3,
+  chunkSize: number = 1,
 ): Array<{ text: string; startFrame: number; endFrame: number }> {
   const timings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
   for (let i = 0; i < words.length; i += chunkSize) {
@@ -593,23 +601,23 @@ async function assembleVideoWithRemotion(
   console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${OUTRO_SEC}s outro)`);
 
   // ── Build subtitle timings ────────────────────────────────────────────────
-  const SUBTITLE_CHUNK = 3;
+  const SUBTITLE_CHUNK = 1;
   const cleanedScript = cleanVoiceoverScript(script);
   let subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
 
   if (wordTimestamps && wordTimestamps.length > 0) {
     subtitleTimings = buildSubtitleTimingsFromWords(wordTimestamps, FPS, SUBTITLE_CHUNK);
-    console.log(`  Subtitle chunks: ${subtitleTimings.length} (real UnrealSpeech timestamps ✓)`);
+    console.log(`  Subtitle chunks: ${subtitleTimings.length} (real UnrealSpeech word timestamps ✓)`);
   } else {
-    const WORDS_PER_SEC = 2.4;
+    const WORDS_PER_SEC = 2.8;
+    // 1-word-at-a-time heuristic for Will (male) voice
     const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
-    for (let i = 0; i < scriptWords.length; i += SUBTITLE_CHUNK) {
-      const chunk = scriptWords.slice(i, i + SUBTITLE_CHUNK);
+    for (let i = 0; i < scriptWords.length; i++) {
       const startSec = i / WORDS_PER_SEC;
-      const endSec = (i + chunk.length) / WORDS_PER_SEC;
+      const endSec = (i + 1) / WORDS_PER_SEC;
       if (startSec >= audioDurationSec) break;
       subtitleTimings.push({
-        text: chunk.join(' ').toUpperCase(),
+        text: scriptWords[i].toUpperCase(),
         startFrame: Math.round(startSec * FPS),
         endFrame: Math.min(Math.round(endSec * FPS), audioDurationFrames),
       });
@@ -622,7 +630,7 @@ async function assembleVideoWithRemotion(
         t.endFrame   = Math.round(t.endFrame   * scale);
       }
     }
-    console.log(`  Subtitle chunks: ${subtitleTimings.length} (heuristic fallback — timestamps unavailable)`);
+    console.log(`  Subtitle chunks: ${subtitleTimings.length} (heuristic 1-word fallback — timestamps unavailable)`);
   }
 
   console.log('  Converting assets to data URLs...');

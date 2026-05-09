@@ -348,46 +348,7 @@ function cleanVoiceoverScript(raw: string): string {
   return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings.';
 }
 
-// ─── Voiceover ────────────────────────────────────────────────────────────────
-
-async function generateVoiceover(script: string): Promise<Buffer> {
-  const cleanScript = cleanVoiceoverScript(script);
-
-  return tryWithKeys('unrealspeech', async (key) => {
-    const resp = await fetch('https://api.v6.unrealspeech.com/speech', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Text: cleanScript,
-        VoiceId: 'Scarlett',
-        Bitrate: '192k',
-        Speed: '-0.1',
-        Pitch: '1.0',
-        Codec: 'libmp3lame',
-        Temperature: '0.3',
-      }),
-    });
-    if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
-
-    const ct = resp.headers.get('content-type') ?? '';
-    if (ct.includes('application/json')) {
-      const json = await resp.json() as any;
-      if (!json.OutputUri) throw new Error(`UnrealSpeech: no OutputUri — ${JSON.stringify(json)}`);
-      console.log(`     → Downloading audio from S3...`);
-      const audioResp = await fetch(json.OutputUri);
-      if (!audioResp.ok) throw new Error(`S3 audio download failed: ${audioResp.status}`);
-      const buf = Buffer.from(await audioResp.arrayBuffer());
-      if (buf.byteLength < 1000) throw new Error(`UnrealSpeech S3 audio empty (${buf.byteLength} bytes)`);
-      return buf;
-    }
-
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.byteLength < 1000) throw new Error(`UnrealSpeech returned empty audio (${buf.byteLength} bytes)`);
-    return buf;
-  });
-}
-
-// ─── UnrealSpeech Word Timestamps ────────────────────────────────────────────
+// ─── Voiceover + Real Timestamps (UnrealSpeech /synthesisTasks) ──────────────
 
 interface WordTimestamp {
   word: string;
@@ -395,63 +356,87 @@ interface WordTimestamp {
   end: number;
 }
 
+interface VoiceoverResult {
+  audioBuffer: Buffer;
+  wordTimestamps: WordTimestamp[] | null;
+}
+
 /**
- * Fetches real word-level timestamps from UnrealSpeech /timestamps endpoint.
- * Returns null on failure — caller falls back to heuristic timing.
- * API: POST https://api.v6.unrealspeech.com/timestamps → { TimestampsUri }
- * TimestampsUri resolves to JSON: [{word, start, end}, ...]
+ * Generates voiceover and retrieves real word-level timestamps in one call
+ * via UnrealSpeech /synthesisTasks (async, polls until complete).
+ * API: POST /synthesisTasks → { SynthesisTask: { OutputUri, TimestampsUri, TaskId, TaskStatus } }
+ * Timestamps JSON: [{ word, start, end, text_offset }, ...]
  */
-async function fetchWordTimestamps(script: string): Promise<WordTimestamp[] | null> {
+async function generateVoiceoverWithTimestamps(script: string): Promise<VoiceoverResult> {
   const cleanScript = cleanVoiceoverScript(script);
-  try {
-    const words = await tryWithKeys('unrealspeech', async (key) => {
-      const resp = await fetch('https://api.v6.unrealspeech.com/timestamps', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          Text: cleanScript,
-          VoiceId: 'Scarlett',
-        }),
-      });
-      if (!resp.ok) throw new Error(`UnrealSpeech timestamps ${resp.status}: ${await resp.text()}`);
-      const json = await resp.json() as any;
 
-      if (!json.TimestampsUri) throw new Error('No TimestampsUri in timestamps response');
-
-      const tsResp = await fetch(json.TimestampsUri, { signal: AbortSignal.timeout(15000) });
-      if (!tsResp.ok) throw new Error(`Timestamps S3 download failed: ${tsResp.status}`);
-      const tsData = await tsResp.json() as any;
-
-      let parsed: WordTimestamp[] = [];
-      if (Array.isArray(tsData)) {
-        parsed = tsData.map((w: any) => ({
-          word: String(w.word || w.text || w.Word || '').replace(/[^\w''-]/g, ''),
-          start: Number(w.start ?? w.Start ?? w.begin ?? 0),
-          end: Number(w.end ?? w.End ?? w.stop ?? 0),
-        }));
-      } else if (tsData?.words && Array.isArray(tsData.words)) {
-        parsed = tsData.words.map((w: any) => ({
-          word: String(w.word || w.text || '').replace(/[^\w''-]/g, ''),
-          start: Number(w.start ?? 0),
-          end: Number(w.end ?? 0),
-        }));
-      } else {
-        throw new Error(`Unrecognized timestamps format: ${JSON.stringify(tsData).slice(0, 120)}`);
-      }
-
-      return parsed.filter(w => w.word.trim().length > 0 && w.end > w.start);
+  return tryWithKeys('unrealspeech', async (key) => {
+    const initResp = await fetch('https://api.v6.unrealspeech.com/synthesisTasks', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Text: cleanScript,
+        VoiceId: 'Scarlett',
+        Bitrate: '192k',
+        TimestampType: 'word',
+      }),
     });
+    if (!initResp.ok) throw new Error(`UnrealSpeech synthesisTasks ${initResp.status}: ${await initResp.text()}`);
+    const initJson = await initResp.json() as any;
+    const task = initJson.SynthesisTask ?? initJson;
+    const taskId = task.TaskId;
+    if (!taskId) throw new Error(`UnrealSpeech: no TaskId in response — ${JSON.stringify(initJson).slice(0, 200)}`);
 
-    if (words.length === 0) {
-      console.warn('     ⚠ Timestamps returned 0 valid words — using heuristic fallback');
-      return null;
+    let outputUri: string = task.OutputUri ?? '';
+    let timestampsUri: string = task.TimestampsUri ?? '';
+    let taskStatus: string = task.TaskStatus ?? 'scheduled';
+
+    const MAX_POLLS = 30;
+    for (let i = 0; i < MAX_POLLS && taskStatus !== 'completed'; i++) {
+      await new Promise(res => setTimeout(res, 3000));
+      const pollResp = await fetch(`https://api.v6.unrealspeech.com/synthesisTasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!pollResp.ok) continue;
+      const pollJson = await pollResp.json() as any;
+      const pollTask = pollJson.SynthesisTask ?? pollJson;
+      taskStatus = pollTask.TaskStatus ?? taskStatus;
+      if (pollTask.OutputUri) outputUri = pollTask.OutputUri;
+      if (pollTask.TimestampsUri) timestampsUri = pollTask.TimestampsUri;
     }
-    console.log(`     → Real timestamps: ${words.length} words (first: "${words[0].word}" @ ${words[0].start.toFixed(2)}s)`);
-    return words;
-  } catch (e: any) {
-    console.warn(`     ⚠ Timestamps failed (${e.message.slice(0, 80)}) — using heuristic fallback`);
-    return null;
-  }
+
+    if (!outputUri) throw new Error(`UnrealSpeech: synthesis task never completed (TaskId: ${taskId})`);
+
+    console.log(`     → Downloading audio from S3...`);
+    const audioResp = await fetch(outputUri, { signal: AbortSignal.timeout(30000) });
+    if (!audioResp.ok) throw new Error(`S3 audio download failed: ${audioResp.status}`);
+    const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
+    if (audioBuffer.byteLength < 1000) throw new Error(`UnrealSpeech S3 audio empty (${audioBuffer.byteLength} bytes)`);
+
+    let wordTimestamps: WordTimestamp[] | null = null;
+    if (timestampsUri) {
+      try {
+        const tsResp = await fetch(timestampsUri, { signal: AbortSignal.timeout(15000) });
+        if (tsResp.ok) {
+          const tsData = await tsResp.json() as any;
+          const raw: Array<any> = Array.isArray(tsData) ? tsData : (tsData.words ?? []);
+          const parsed = raw.map((w: any) => ({
+            word: String(w.word || w.text || '').replace(/[.,!?;:]/g, '').trim(),
+            start: Number(w.start ?? 0),
+            end: Number(w.end ?? 0),
+          })).filter((w: WordTimestamp) => w.word.length > 0 && w.end > w.start);
+          if (parsed.length > 0) {
+            wordTimestamps = parsed;
+            console.log(`     → Real timestamps: ${parsed.length} words ✓ (first: "${parsed[0].word}" @ ${parsed[0].start.toFixed(2)}s)`);
+          }
+        }
+      } catch (tsErr: any) {
+        console.warn(`     ⚠ Timestamp download failed: ${tsErr.message.slice(0, 60)} — using heuristic`);
+      }
+    }
+
+    return { audioBuffer, wordTimestamps };
+  });
 }
 
 // ─── Build Subtitle Timings From Word Timestamps ──────────────────────────────
@@ -696,10 +681,10 @@ async function assembleVideoWithRemotion(
     inputProps,
     timeoutInMilliseconds: 18 * 60 * 1000,
     chromiumOptions: { disableWebSecurity: true },
-    onProgress: ({ renderedFrames, totalFrames }: any) => {
-      if (renderedFrames % 150 === 0 || renderedFrames === totalFrames) {
-        const pct = ((renderedFrames / totalFrames) * 100).toFixed(0);
-        console.log(`    ↳ ${renderedFrames}/${totalFrames} frames (${pct}%)`);
+    onProgress: ({ renderedFrames }: any) => {
+      if (renderedFrames % 150 === 0 || renderedFrames === durationInFrames) {
+        const pct = ((renderedFrames / durationInFrames) * 100).toFixed(0);
+        console.log(`    ↳ ${renderedFrames}/${durationInFrames} frames (${pct}%)`);
       }
     },
   });
@@ -824,21 +809,12 @@ async function runPipeline(schedule: any): Promise<void> {
     console.log(`     → "${title}" | ${scenes.length} scenes`);
     if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
 
-    // 3. Voiceover + timestamps in parallel
+    // 3. Voiceover + real word timestamps via UnrealSpeech /synthesisTasks
     console.log('  3/8 Generating voiceover + real timestamps (UnrealSpeech)...');
-    const [audioResult, timestampsResult] = await Promise.allSettled([
-      generateVoiceover(script),
-      fetchWordTimestamps(script),
-    ]);
-
-    if (audioResult.status === 'rejected') throw new Error(`Voiceover failed: ${audioResult.reason?.message}`);
-    const audioBuffer = audioResult.value;
-    const wordTimestamps: WordTimestamp[] | null = timestampsResult.status === 'fulfilled' ? timestampsResult.value : null;
-
+    const { audioBuffer, wordTimestamps } = await generateVoiceoverWithTimestamps(script);
     const audioPath = join(tmpDir, 'voice.mp3');
     writeFileSync(audioPath, audioBuffer);
     console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB audio`);
-    if (wordTimestamps) console.log(`     → ${wordTimestamps.length} word timestamps ✓`);
 
     // 4. Background music
     console.log('  4/8 Downloading background music...');

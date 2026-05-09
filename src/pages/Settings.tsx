@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Key, Trash2, Plus, Eye, EyeOff, Check, X,
   AlertCircle, Database, Loader2, RefreshCw,
-  Activity, Clock, TrendingUp, Shield,
+  Activity, Clock, TrendingUp, Shield, Image,
 } from 'lucide-react';
 import { ApiKey } from '../types';
 import {
@@ -20,6 +20,7 @@ interface ServiceGroup {
   description: string;
   color: string;
   accentBg: string;
+  badge?: string;
   fields: { service: Service; fieldLabel: string; placeholder: string }[];
 }
 
@@ -33,13 +34,21 @@ const SERVICE_GROUPS: ServiceGroup[] = [
   },
   {
     label: 'Cloudflare Workers AI',
-    description: 'Scene image generation. Both Account ID and API Token required.',
+    description: 'Primary scene image generation. Both Account ID and API Token required. Add multiple tokens for automatic rotation.',
     color: 'text-orange-400',
     accentBg: 'bg-orange-500/10',
     fields: [
       { service: 'cloudflare_id', fieldLabel: 'Account ID', placeholder: 'a1b2c3d4e5f6g7h8…' },
       { service: 'cloudflare', fieldLabel: 'API Token', placeholder: 'Bearer ••••••••' },
     ],
+  },
+  {
+    label: 'Pollinations AI',
+    description: 'Free AI image generation fallback. Automatically activated when Cloudflare quota is exhausted. No API key required — add a token only if you have a premium Pollinations account.',
+    color: 'text-green-400',
+    accentBg: 'bg-green-500/10',
+    badge: 'Auto Fallback',
+    fields: [{ service: 'pollinations', fieldLabel: 'API Token (Optional)', placeholder: 'Optional premium token…' }],
   },
   {
     label: 'UnrealSpeech API',
@@ -50,12 +59,13 @@ const SERVICE_GROUPS: ServiceGroup[] = [
   },
 ];
 
-const ALL_SERVICES: Service[] = ['cerebras', 'cloudflare_id', 'cloudflare', 'unrealspeech'];
+const ALL_SERVICES: Service[] = ['cerebras', 'cloudflare_id', 'cloudflare', 'pollinations', 'unrealspeech'];
 
 const SERVICE_LABEL: Record<Service, string> = {
   cerebras: 'Cerebras — API Key',
   cloudflare_id: 'Cloudflare — Account ID',
   cloudflare: 'Cloudflare — API Token',
+  pollinations: 'Pollinations AI — API Token (Optional)',
   unrealspeech: 'UnrealSpeech — API Key',
 };
 
@@ -93,7 +103,7 @@ export default function Settings() {
     <div className="max-w-3xl">
       <div className="mb-8 md:mb-12">
         <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Platform Settings</h1>
-        <p className="text-white/40 text-sm md:text-base">Manage API credentials with automatic key rotation and usage tracking.</p>
+        <p className="text-white/40 text-sm md:text-base">Manage API credentials with automatic key rotation and intelligent fallback.</p>
       </div>
 
       <div className="space-y-6 md:space-y-8">
@@ -110,6 +120,7 @@ export default function Settings() {
 
         <ConnectionStatus />
         <RotationBanner />
+        <FallbackBanner />
         <ApiKeyManager />
       </div>
     </div>
@@ -168,6 +179,37 @@ function RotationBanner() {
   );
 }
 
+function FallbackBanner() {
+  return (
+    <div className="glass rounded-2xl border border-green-500/10 p-5 md:p-6">
+      <div className="flex items-start gap-4">
+        <div className="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center text-green-400 shrink-0 mt-0.5">
+          <Image size={20} />
+        </div>
+        <div>
+          <h3 className="font-bold text-sm md:text-base mb-1">Intelligent Image Generation Fallback</h3>
+          <p className="text-xs text-white/40 leading-relaxed">
+            The pipeline first attempts Cloudflare Workers AI (with automatic key rotation) for each scene image.
+            If all Cloudflare keys are exhausted or rate-limited, it automatically falls back to Pollinations AI — a free public service with no daily quota.
+            Video generation is never blocked by image API failures.
+          </p>
+          <div className="flex flex-wrap gap-3 mt-3">
+            {[
+              { label: '1st: Cloudflare AI', color: 'text-orange-400 border-orange-500/20' },
+              { label: '2nd: Pollinations AI', color: 'text-green-400 border-green-500/20' },
+              { label: '3rd: Dark fallback', color: 'text-white/30 border-white/10' },
+            ].map(({ label, color }) => (
+              <span key={label} className={`flex items-center gap-1.5 text-[10px] uppercase font-mono tracking-widest border px-3 py-1.5 rounded-full ${color}`}>
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ApiKeyManager() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,7 +242,6 @@ function ApiKeyManager() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Real-time subscription
   useEffect(() => {
     if (!HAS_SUPABASE) return;
     const unsub = subscribeToApiKeys(({ eventType, key }) => {
@@ -290,14 +331,12 @@ function ApiKeyManager() {
     });
   };
 
-  // Stats summary
   const totalRequests = keys.reduce((s, k) => s + k.request_count, 0);
   const activeCount = keys.filter(k => k.is_active && k.status === 'active').length;
   const rateLimitedCount = keys.filter(k => k.status === 'rate_limited').length;
 
   return (
     <div className="space-y-5 md:space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
           <Key size={18} className="text-white/40" /> API Key Management
@@ -312,7 +351,6 @@ function ApiKeyManager() {
         )}
       </div>
 
-      {/* Stats row */}
       {!loading && keys.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {[
@@ -328,7 +366,6 @@ function ApiKeyManager() {
         </div>
       )}
 
-      {/* Add key panel */}
       <AnimatePresence>
         {showAdd && (
           <motion.div
@@ -356,17 +393,22 @@ function ApiKeyManager() {
                   <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">Value</label>
                   <input
                     type="password"
-                    placeholder="Paste value here…"
+                    placeholder={addService === 'pollinations' ? 'Optional — leave empty for free tier' : 'Paste value here…'}
                     value={addValue}
                     onChange={e => setAddValue(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-brand-primary/50 font-mono"
                   />
                 </div>
               </div>
+              {addService === 'pollinations' && (
+                <p className="text-[11px] text-green-400/70 bg-green-500/5 border border-green-500/10 rounded-xl px-4 py-3">
+                  Pollinations AI works without any API key — it is used automatically as a free fallback when Cloudflare quota is exhausted. Only add a token if you have a premium Pollinations account.
+                </p>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={handleAdd}
-                  disabled={adding || !addValue.trim()}
+                  disabled={adding || (!addValue.trim() && addService !== 'pollinations')}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl tiktok-gradient text-sm font-bold disabled:opacity-50"
                 >
                   {adding ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
@@ -396,19 +438,33 @@ function ApiKeyManager() {
         SERVICE_GROUPS.map(group => {
           const groupKeys = keys.filter(k => group.fields.some(f => f.service === k.service));
           const configuredCount = group.fields.filter(f => keys.some(k => k.service === f.service)).length;
+          const isPollinations = group.fields.some(f => f.service === 'pollinations');
 
           return (
             <div key={group.label} className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
               <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <h3 className="font-bold text-sm md:text-base">{group.label}</h3>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h3 className="font-bold text-sm md:text-base">{group.label}</h3>
+                      {group.badge && (
+                        <span className="text-[9px] font-mono uppercase tracking-widest text-green-400/80 border border-green-500/20 px-2 py-0.5 rounded-full bg-green-500/5">
+                          {group.badge}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-white/40 mt-0.5">{group.description}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-white/20">
-                      {configuredCount}/{group.fields.length} configured
-                    </span>
+                    {isPollinations ? (
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-green-400/50">
+                        always available
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-white/20">
+                        {configuredCount}/{group.fields.length} configured
+                      </span>
+                    )}
                     {groupKeys.length > 1 && (
                       <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-brand-primary/60 border border-brand-primary/20 px-2 py-0.5 rounded-full">
                         <RefreshCw size={9} /> rotating
@@ -422,6 +478,7 @@ function ApiKeyManager() {
                 {group.fields.map(({ service, fieldLabel, placeholder }) => {
                   const fieldKeys = keys.filter(k => k.service === service);
                   const hasMultiple = fieldKeys.length > 1;
+                  const isOptionalPollinations = service === 'pollinations';
 
                   return (
                     <div key={service} className="space-y-3">
@@ -452,9 +509,21 @@ function ApiKeyManager() {
                       </div>
 
                       {fieldKeys.length === 0 ? (
-                        <div className="flex items-center gap-3 p-4 rounded-xl border border-dashed border-white/10 bg-white/[0.015]">
-                          <AlertCircle size={14} className="text-white/20 shrink-0" />
-                          <p className="text-xs text-white/20 font-mono flex-1">Not configured</p>
+                        <div className={`flex items-center gap-3 p-4 rounded-xl border border-dashed bg-white/[0.015] ${isOptionalPollinations ? 'border-green-500/20' : 'border-white/10'}`}>
+                          {isOptionalPollinations ? (
+                            <>
+                              <Check size={14} className="text-green-400/50 shrink-0" />
+                              <div className="flex-1">
+                                <p className="text-xs text-green-400/60 font-mono">Free public API active — no key required</p>
+                                <p className="text-[10px] text-white/20 mt-0.5">Automatically used as fallback when Cloudflare is unavailable</p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle size={14} className="text-white/20 shrink-0" />
+                              <p className="text-xs text-white/20 font-mono flex-1">Not configured</p>
+                            </>
+                          )}
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -524,44 +593,49 @@ function ApiKeyManager() {
                                             <Clock size={10} />
                                             <span>{timeAgo(key.last_used_at)}</span>
                                           </div>
-                                          {key.error_count > 0 && (
-                                            <span className="text-[10px] text-red-400/60">{key.error_count} errors</span>
-                                          )}
                                         </div>
                                       </div>
                                     </div>
 
                                     <div className="flex items-center gap-1 shrink-0">
-                                      <button onClick={() => toggleReveal(key.id)} className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all" title={revealedIds.has(key.id) ? 'Hide' : 'Reveal'}>
-                                        {revealedIds.has(key.id) ? <EyeOff size={13} /> : <Eye size={13} />}
+                                      <button
+                                        onClick={() => toggleReveal(key.id)}
+                                        className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
+                                        title={revealedIds.has(key.id) ? 'Hide' : 'Reveal'}
+                                      >
+                                        {revealedIds.has(key.id) ? <EyeOff size={14} /> : <Eye size={14} />}
                                       </button>
-                                      <button onClick={() => startEdit(key)} className="p-1.5 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all" title="Edit">
-                                        <Key size={13} />
+                                      <button
+                                        onClick={() => startEdit(key)}
+                                        className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
+                                        title="Edit value"
+                                      >
+                                        <Key size={14} />
                                       </button>
-                                      {(key.status === 'rate_limited' || key.status === 'failed') && (
+                                      {key.status !== 'active' && (
                                         <button
                                           onClick={() => handleReset(key.id)}
                                           disabled={resettingId === key.id}
-                                          className="p-1.5 rounded-lg hover:bg-green-500/10 text-white/30 hover:text-green-400 transition-all disabled:opacity-50"
+                                          className="p-2 rounded-lg hover:bg-white/5 text-yellow-400/60 hover:text-yellow-400 transition-all"
                                           title="Reset status to active"
                                         >
-                                          {resettingId === key.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                                          {resettingId === key.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                                         </button>
                                       )}
                                       <button
                                         onClick={() => handleToggle(key)}
-                                        className={`p-1.5 rounded-lg transition-all ${key.is_active ? 'hover:bg-yellow-500/10 text-yellow-500/40 hover:text-yellow-400' : 'hover:bg-green-500/10 text-green-500/40 hover:text-green-400'}`}
-                                        title={key.is_active ? 'Deactivate' : 'Activate'}
+                                        className={`p-2 rounded-lg hover:bg-white/5 transition-all ${key.is_active ? 'text-green-400/60 hover:text-green-400' : 'text-white/20 hover:text-white'}`}
+                                        title={key.is_active ? 'Disable key' : 'Enable key'}
                                       >
-                                        {key.is_active ? <X size={13} /> : <Check size={13} />}
+                                        {key.is_active ? <Check size={14} /> : <X size={14} />}
                                       </button>
                                       <button
                                         onClick={() => handleDelete(key.id)}
                                         disabled={deletingId === key.id}
-                                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all disabled:opacity-50"
-                                        title="Delete"
+                                        className="p-2 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all"
+                                        title="Delete key"
                                       >
-                                        {deletingId === key.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                        {deletingId === key.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                       </button>
                                     </div>
                                   </div>

@@ -469,15 +469,19 @@ function buildSubtitleTimingsFromWords(
 
 // ─── Image Generation ──────────────────────────────────────────────────────────
 
-async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
+function buildImagePrompt(sceneDesc: string): string {
   const cleanDesc = sceneDesc.replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '').replace(/\[.*?\]/g, '').trim();
-  const prompt = [
+  return [
     cleanDesc,
     'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, cinematic dark dramatic atmosphere, professional photography, photorealistic.',
     'STRICT: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels, NO signs, NO titles anywhere in the image — pure visual only.',
     'Do NOT split into panels or multiple images. Single full-frame portrait scene only.',
     'Do NOT include any writing, typography, or overlaid text of any kind.',
   ].join(' ');
+}
+
+async function generateImageWithCloudflare(sceneDesc: string, index: number): Promise<Buffer> {
+  const prompt = buildImagePrompt(sceneDesc);
 
   return tryWithKeys('cloudflare', async (cfToken) => {
     const { data: idKeys } = await supabase
@@ -510,6 +514,56 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
     }
     throw new Error(`Unexpected Cloudflare response for scene ${index + 1}`);
   });
+}
+
+async function generateImageWithPollinations(sceneDesc: string, index: number): Promise<Buffer> {
+  const prompt = buildImagePrompt(sceneDesc);
+  const seed = Math.floor(Math.random() * 999999);
+  const encodedPrompt = encodeURIComponent(prompt.slice(0, 1500));
+  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${seed}`;
+
+  const headers: Record<string, string> = {};
+  try {
+    const { data: polKeys } = await supabase
+      .from('api_keys')
+      .select('id, key_value, request_count, success_count, error_count')
+      .eq('service', 'pollinations')
+      .eq('is_active', true)
+      .neq('status', 'failed')
+      .order('request_count', { ascending: true })
+      .limit(1);
+    if (polKeys?.[0]?.key_value) {
+      headers['Authorization'] = `Bearer ${polKeys[0].key_value}`;
+      await supabase.from('api_keys').update({
+        request_count: (polKeys[0].request_count || 0) + 1,
+        success_count: (polKeys[0].success_count || 0) + 1,
+        status: 'active',
+        last_used_at: new Date().toISOString(),
+      }).eq('id', polKeys[0].id);
+    }
+  } catch { /* no pollinations key configured — use anonymous free tier */ }
+
+  console.log(`     → Pollinations AI: scene ${index + 1}...`);
+  const resp = await fetch(url, { headers, signal: AbortSignal.timeout(90000) });
+  if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
+
+  const imgBuf = Buffer.from(await resp.arrayBuffer());
+  if (imgBuf.byteLength < 5000) throw new Error(`Pollinations returned empty image (${imgBuf.byteLength} bytes)`);
+
+  console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+  return cropToPortrait(imgBuf);
+}
+
+async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
+  // Step 1: Try Cloudflare AI with automatic key rotation
+  try {
+    return await generateImageWithCloudflare(sceneDesc, index);
+  } catch (cfErr: any) {
+    console.warn(`     ⚠ Cloudflare failed scene ${index + 1}: ${cfErr.message.slice(0, 80)} — falling back to Pollinations`);
+  }
+
+  // Step 2: Pollinations AI fallback (free public API, no daily quota)
+  return generateImageWithPollinations(sceneDesc, index);
 }
 
 async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
@@ -567,7 +621,8 @@ async function assembleVideoWithRemotion(
   const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
 
   const FPS = 30;
-  const OUTRO_SEC = 5.0;
+  const OUTRO_SEC = 8.0;
+  const AUDIO_BUFFER_SEC = 1.5;
 
   const audioBytes = readFileSync(audioPath).byteLength;
   const hasAudio = audioBytes > 1000;
@@ -592,10 +647,10 @@ async function assembleVideoWithRemotion(
     }
   }
 
-  const totalSec = Math.min(audioDurationSec + OUTRO_SEC, 90);
+  const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 90);
   const durationInFrames = Math.ceil(totalSec * FPS);
   const audioDurationFrames = Math.round(audioDurationSec * FPS);
-  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${OUTRO_SEC}s outro)`);
+  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${AUDIO_BUFFER_SEC}s buffer + ${OUTRO_SEC}s outro)`);
 
   // ── Build subtitle timings ────────────────────────────────────────────────
   const SUBTITLE_CHUNK = 1;
@@ -832,10 +887,12 @@ async function runPipeline(schedule: any): Promise<void> {
     console.log(`     → Hashtags: ${hashtags.split(' ').length} tags`);
     if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
 
-    // 6. Scene images — all 5 in parallel
-    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI)...`);
+    // 6. Scene images — staggered parallel (300ms apart for key rotation)
+    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI → Pollinations fallback)...`);
     const _imgResults = await Promise.allSettled(
-      scenes.map((scene, i) => generateImage(scene, i))
+      scenes.map((scene, i) =>
+        new Promise<void>(res => setTimeout(res, i * 300)).then(() => generateImage(scene, i))
+      )
     );
     const imagePaths: string[] = [];
     for (let i = 0; i < _imgResults.length; i++) {
@@ -956,13 +1013,18 @@ async function main(): Promise<void> {
     .neq('status', 'failed');
 
   const servicesPresent = new Set((activeKeys ?? []).map((k: any) => k.service));
-  const required = ['cerebras', 'cloudflare', 'cloudflare_id', 'unrealspeech'];
+  const required = ['cerebras', 'unrealspeech'];
   const missing = required.filter(s => !servicesPresent.has(s));
 
   if (missing.length > 0) {
     console.error(`❌ Missing API keys in Supabase: ${missing.join(', ')}`);
     console.error('   → Add them via the Settings page in the AutoViral dashboard.');
     process.exit(1);
+  }
+
+  const hasCF = servicesPresent.has('cloudflare') && servicesPresent.has('cloudflare_id');
+  if (!hasCF) {
+    console.warn('⚠ No Cloudflare AI keys — image generation will use Pollinations AI (free fallback)');
   }
 
   const { data: schedules, error } = await supabase

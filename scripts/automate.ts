@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
@@ -90,7 +90,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
         }).eq('id', key.id);
         return result;
       } catch (e: any) {
-        const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic/i.test(e.message ?? '');
+        const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic|neurons|daily.*alloc/i.test(e.message ?? '');
         if (isRateLimit && attempt < maxAttempts) {
           const delay = attempt * 4000;
           console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
@@ -502,14 +502,11 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
 
     const ct = resp.headers.get('content-type') ?? '';
     if (ct.includes('image/')) {
-      const buf = Buffer.from(await resp.arrayBuffer());
-      return cropToPortrait(buf);
+      return cropToPortrait(Buffer.from(await resp.arrayBuffer()));
     }
-
     const json = await resp.json() as any;
     if (json?.result?.image) {
-      const buf = Buffer.from(json.result.image, 'base64');
-      return cropToPortrait(buf);
+      return cropToPortrait(Buffer.from(json.result.image, 'base64'));
     }
     throw new Error(`Unexpected Cloudflare response for scene ${index + 1}`);
   });
@@ -853,8 +850,7 @@ async function runPipeline(schedule: any): Promise<void> {
         const pp = join(tmpDir, `scene_${i}.jpg`);
         try {
           execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${pp}" 2>/dev/null || true`);
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          if (require('fs').existsSync(pp) && require('fs').statSync(pp).size > 100) imagePaths.push(pp);
+          if (existsSync(pp) && statSync(pp).size > 100) imagePaths.push(pp);
         } catch { /* skip */ }
       }
     }

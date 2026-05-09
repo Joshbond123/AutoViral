@@ -28,8 +28,6 @@ const NICHES = [
   'Crypto Romance Scam',
 ];
 
-// ─── Curated Royalty-Free Background Music ─────────────────────────────────
-// All tracks are royalty-free and suitable for social media content
 const BACKGROUND_MUSIC_TRACKS = [
   'https://assets.mixkit.co/music/preview/mixkit-dramatic-mystery-trailer-599.mp3',
   'https://assets.mixkit.co/music/preview/mixkit-news-big-moment-574.mp3',
@@ -107,7 +105,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
   throw lastError ?? new Error(`All keys for ${service} exhausted`);
 }
 
-// ─── TopicShield™ ─────────────────────────────────────────────────────────────
+// ─── TopicShield ──────────────────────────────────────────────────────────────
 
 interface ScriptResult {
   title: string;
@@ -161,9 +159,9 @@ Write a complete TikTok video package. Follow every rule exactly.
 VOICEOVER RULES (the "script" field):
 - Pure natural spoken words only — exactly what the narrator says out loud to the camera
 - Start with a shocking hook (alarming question or fact) in the very first sentence
-- 120-150 words total (45-55 seconds when spoken at a normal pace)
+- 130-160 words total (50-60 seconds when spoken at a normal pace)
 - Direct, personal — use "you", "your", speak to the viewer
-- End with exactly this sentence: "Follow for daily crypto scam warnings."
+- IMPORTANT: End with EXACTLY these two sentences: "If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings."
 - FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
@@ -206,8 +204,6 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
       if (match) {
         const parsed = JSON.parse(match[0]);
         const rawScenes: string[] = Array.isArray(parsed.scenes) ? parsed.scenes : [];
-
-        // Ensure we always have exactly 5 scenes
         const defaultScenes = [
           `${topic} — shadowy hacker figure at multiple monitors, dark dramatic lighting, cinematic vertical`,
           `${topic} — crashing red stock charts on screen, person looking shocked, dark office environment`,
@@ -215,25 +211,25 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
           `${topic} — anonymous hooded figure in dimly lit room, suspicious activity, blue neon lighting`,
           `${topic} — glowing warning signs and digital lock icons, dark background, dramatic cinematic`,
         ];
-
-        const scenes = rawScenes.length >= 5
-          ? rawScenes.slice(0, 5)
-          : [...rawScenes, ...defaultScenes.slice(rawScenes.length)];
-
-        return {
-          title: (parsed.title || topic).slice(0, 150),
-          // Validate script: reject if it looks like JSON/image prompts, not speech
-            script: (typeof parsed.script === 'string' && parsed.script.trim().length >= 60 &&
-              !parsed.script.includes('{') && !parsed.script.includes('"scenes"') &&
-              !/^(Scene|Voiceover|Script|Title|Narrator)\s*\d*\s*:/im.test(parsed.script))
-              ? parsed.script.trim()
-              : content.split(/\n+/).map(l => l.trim()).filter(l =>
-                  l.length > 60 && !l.startsWith('"') && !l.includes('://') &&
-                  !l.includes('{') && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l)
-                ).sort((a,b) => b.length-a.length)[0]
-                || `This crypto scam has already stolen millions. Stay alert and never trust unverified investments. Follow for daily crypto scam warnings.`,
-          scenes,
-        };
+        const scenes = rawScenes.length >= 5 ? rawScenes.slice(0, 5) : [...rawScenes, ...defaultScenes.slice(rawScenes.length)];
+        let _scriptText = '';
+        if (
+          typeof parsed.script === 'string' &&
+          parsed.script.trim().length >= 60 &&
+          !parsed.script.includes('{') &&
+          !parsed.script.includes('"scenes"') &&
+          !/^(Scene|Voiceover|Script|Title|Narrator)\s*\d*\s*:/im.test(parsed.script)
+        ) {
+          _scriptText = parsed.script.trim();
+        } else {
+          const _candidates = content.split(/\n+/).map((l: string) => l.trim()).filter((l: string) =>
+            l.length > 60 && !l.startsWith('"') && !l.includes('://') &&
+            !l.includes('{') && !/{\s*"/.test(l) && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l)
+          );
+          _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
+            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings.`;
+        }
+        return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
       }
     } catch { /* fall through */ }
 
@@ -251,45 +247,110 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
   });
 }
 
+// ─── Caption Generation ───────────────────────────────────────────────────────
+
+interface CaptionResult {
+  caption: string;
+  hashtags: string;
+}
+
+async function generateCaptionAndHashtags(topic: string, niche: string, title: string, script: string): Promise<CaptionResult> {
+  const scriptPreview = script.slice(0, 250);
+  const prompt = `You are a viral TikTok content strategist specializing in crypto scam awareness content.
+
+Create a viral TikTok caption and hashtag set for this video:
+Title: "${title}"
+Topic: "${topic}"
+Niche: "${niche}"
+Script preview: "${scriptPreview}..."
+
+CAPTION RULES:
+- Maximum 150 characters
+- Start with a powerful hook (shocking stat, question, or statement)
+- Include urgency and emotional pull
+- End with a strong CTA ("Follow for more", "Share to warn others", "Save this")
+- No emojis
+- Pure text, highly engaging
+
+HASHTAG RULES:
+- Exactly 12 hashtags
+- Mix of: high-volume TikTok tags, niche-specific tags, and trending crypto/scam awareness tags
+- Include: #cryptoscam #cryptowarning #scamalert and relevant niche tags
+- Format: space-separated on one line
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "caption": "your caption here",
+  "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5 #tag6 #tag7 #tag8 #tag9 #tag10 #tag11 #tag12"
+}`;
+
+  try {
+    return await tryWithKeys('cerebras', async (key) => {
+      const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'qwen-3-235b-a22b-instruct-2507',
+          max_tokens: 400,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) throw new Error(`Cerebras caption ${resp.status}: ${await resp.text()}`);
+      const json = await resp.json() as any;
+      const content = (json.choices?.[0]?.message?.content ?? '').trim();
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        return {
+          caption: (parsed.caption || `${title} - This crypto scam could steal everything from you. Share to protect others. Follow for daily crypto scam warnings.`).slice(0, 150),
+          hashtags: parsed.hashtags || '#cryptoscam #cryptowarning #scamalert #cryptoeducation #cryptosafety #bitcoinscam #cryptofraud #scamexposed #cryptonews #digitalcrime #onlinescam #protectyourself',
+        };
+      }
+      throw new Error('No JSON in response');
+    });
+  } catch (e: any) {
+    console.warn(`  ⚠ Caption generation failed: ${e.message} — using defaults`);
+    return {
+      caption: `${title.slice(0, 100)} - This crypto scam has already stolen millions. Share to warn others. Follow for daily crypto scam warnings.`,
+      hashtags: '#cryptoscam #cryptowarning #scamalert #cryptoeducation #cryptosafety #bitcoinscam #cryptofraud #scamexposed #cryptonews #digitalcrime #onlinescam #protectyourself',
+    };
+  }
+}
+
+// ─── Script Cleaner ───────────────────────────────────────────────────────────
+
+function cleanVoiceoverScript(raw: string): string {
+  const IMAGE_KW = /\b(cinematic|portrait|photorealistic|9:16|aspect ratio|vertical orientation|dramatic atmosphere|neon lighting|hyperrealistic|full-frame|dark background|cinematography)\b/i;
+
+  let text = raw
+    .replace(/```[\s\S]*?```/gm, '')
+    .replace(/^\s*"(?:title|script|scenes|niche|topic|hook|cta|outro)"\s*:.*/gim, '')
+    .replace(/^\s*[\[\]{}]\s*$/gm, '')
+    .replace(/\[[^\]]{0,300}\]/g, '')
+    .replace(/\((?![a-zA-Z]'[a-zA-Z])[^)]{0,200}\)/gi, '')
+    .replace(/^(scene|script|voiceover|narrator|note|hook|cta|body|intro|outro|title|image\s*prompt|visual|description|caption)\s*[\d:.\-]*.*/gim, '')
+    .replace(/^scene\s*\d+[:.\-].*/gim, '')
+    .replace(/[*_~`#@]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(p => p.length > 40);
+  const speech = paragraphs.filter(p =>
+    p.split(/\s+/).length >= 12 &&
+    !/^[A-Z][a-zA-Z ]+:/.test(p) &&
+    !IMAGE_KW.test(p) &&
+    !/[{}"\[\]]/.test(p)
+  );
+
+  if (speech.length > 0) {
+    return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
+  }
+  return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings.';
+}
+
 // ─── Voiceover ────────────────────────────────────────────────────────────────
 
-/**
- * Strip anything from the script that is NOT spoken words:
- * brackets, stage directions, label prefixes, markdown, Scene/Script headers.
- * This prevents the TTS from reading "[dramatic pause]" or "Scene 1: …" aloud.
- */
-function cleanVoiceoverScript(raw: string): string {
-    const IMAGE_KW = /\b(cinematic|portrait|photorealistic|9:16|aspect ratio|vertical orientation|dramatic atmosphere|neon lighting|hyperrealistic|full-frame|dark background|cinematography)\b/i;
-
-    let text = raw
-      // Strip code fences and JSON structure
-      .replace(/```[\s\S]*?```/gm, '')
-      .replace(/^\s*"(?:title|script|scenes|niche|topic|hook|cta|outro)"\s*:.*/gim, '')
-      .replace(/^\s*[\[\]{}]\s*$/gm, '')
-      // Strip bracketed stage directions and parenthetical notes
-      .replace(/\[[^\]]{0,300}\]/g, '')
-      .replace(/\((?![a-zA-Z]'[a-zA-Z])[^)]{0,200}\)/gi, '')
-      // Strip label prefix lines
-      .replace(/^(scene|script|voiceover|narrator|note|hook|cta|body|intro|outro|title|image\s*prompt|visual|description|caption)\s*[\d:.\-]*.*/gim, '')
-      .replace(/^scene\s*\d+[:.\-].*/gim, '')
-      // Strip markdown
-      .replace(/[*_~`#@]/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-
-    // Pick only paragraphs that look like natural spoken language
-    const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(p => p.length > 40);
-    const speech = paragraphs.filter(p =>
-      p.split(/\s+/).length >= 12 &&
-      !/^[A-Z][a-zA-Z ]+:/.test(p) &&
-      !IMAGE_KW.test(p) &&
-      !/[{}"\[\]]/.test(p)
-    );
-
-    if (speech.length > 0) {
-      return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
-    }
-    return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. Follow for daily crypto scam warnings.';(script: string): Promise<Buffer> {
+async function generateVoiceover(script: string): Promise<Buffer> {
   const cleanScript = cleanVoiceoverScript(script);
 
   return tryWithKeys('unrealspeech', async (key) => {
@@ -300,10 +361,10 @@ function cleanVoiceoverScript(raw: string): string {
         Text: cleanScript,
         VoiceId: 'Scarlett',
         Bitrate: '192k',
-        Speed: '-0.1',       // Slightly slower for clarity and impact
+        Speed: '-0.1',
         Pitch: '1.0',
         Codec: 'libmp3lame',
-        Temperature: '0.3',  // Slightly more expressive
+        Temperature: '0.3',
       }),
     });
     if (!resp.ok) throw new Error(`UnrealSpeech ${resp.status}: ${await resp.text()}`);
@@ -326,17 +387,97 @@ function cleanVoiceoverScript(raw: string): string {
   });
 }
 
-// ─── Image Generation ─────────────────────────────────────────────────────────
+// ─── UnrealSpeech Word Timestamps ────────────────────────────────────────────
+
+interface WordTimestamp {
+  word: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Fetches real word-level timestamps from UnrealSpeech /timestamps endpoint.
+ * Returns null on failure — caller falls back to heuristic timing.
+ * API: POST https://api.v6.unrealspeech.com/timestamps → { TimestampsUri }
+ * TimestampsUri resolves to JSON: [{word, start, end}, ...]
+ */
+async function fetchWordTimestamps(script: string): Promise<WordTimestamp[] | null> {
+  const cleanScript = cleanVoiceoverScript(script);
+  try {
+    const words = await tryWithKeys('unrealspeech', async (key) => {
+      const resp = await fetch('https://api.v6.unrealspeech.com/timestamps', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          Text: cleanScript,
+          VoiceId: 'Scarlett',
+        }),
+      });
+      if (!resp.ok) throw new Error(`UnrealSpeech timestamps ${resp.status}: ${await resp.text()}`);
+      const json = await resp.json() as any;
+
+      if (!json.TimestampsUri) throw new Error('No TimestampsUri in timestamps response');
+
+      const tsResp = await fetch(json.TimestampsUri, { signal: AbortSignal.timeout(15000) });
+      if (!tsResp.ok) throw new Error(`Timestamps S3 download failed: ${tsResp.status}`);
+      const tsData = await tsResp.json() as any;
+
+      let parsed: WordTimestamp[] = [];
+      if (Array.isArray(tsData)) {
+        parsed = tsData.map((w: any) => ({
+          word: String(w.word || w.text || w.Word || '').replace(/[^\w''-]/g, ''),
+          start: Number(w.start ?? w.Start ?? w.begin ?? 0),
+          end: Number(w.end ?? w.End ?? w.stop ?? 0),
+        }));
+      } else if (tsData?.words && Array.isArray(tsData.words)) {
+        parsed = tsData.words.map((w: any) => ({
+          word: String(w.word || w.text || '').replace(/[^\w''-]/g, ''),
+          start: Number(w.start ?? 0),
+          end: Number(w.end ?? 0),
+        }));
+      } else {
+        throw new Error(`Unrecognized timestamps format: ${JSON.stringify(tsData).slice(0, 120)}`);
+      }
+
+      return parsed.filter(w => w.word.trim().length > 0 && w.end > w.start);
+    });
+
+    if (words.length === 0) {
+      console.warn('     ⚠ Timestamps returned 0 valid words — using heuristic fallback');
+      return null;
+    }
+    console.log(`     → Real timestamps: ${words.length} words (first: "${words[0].word}" @ ${words[0].start.toFixed(2)}s)`);
+    return words;
+  } catch (e: any) {
+    console.warn(`     ⚠ Timestamps failed (${e.message.slice(0, 80)}) — using heuristic fallback`);
+    return null;
+  }
+}
+
+// ─── Build Subtitle Timings From Word Timestamps ──────────────────────────────
+
+function buildSubtitleTimingsFromWords(
+  words: WordTimestamp[],
+  fps: number,
+  chunkSize: number = 3,
+): Array<{ text: string; startFrame: number; endFrame: number }> {
+  const timings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
+  for (let i = 0; i < words.length; i += chunkSize) {
+    const chunk = words.slice(i, i + chunkSize);
+    const text = chunk.map(w => w.word).join(' ').toUpperCase();
+    const startFrame = Math.round(chunk[0].start * fps);
+    const endFrame = Math.round(chunk[chunk.length - 1].end * fps);
+    if (endFrame > startFrame) {
+      timings.push({ text, startFrame, endFrame });
+    }
+  }
+  return timings;
+}
+
+// ─── Image Generation ──────────────────────────────────────────────────────────
 
 async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
-  // Build a strongly constrained prompt to prevent text and landscape orientation.
-  // The Cloudflare Flux model sometimes renders text or landscape images — we fight
-  // this with explicit negative framing baked into the prompt itself.
-  const cleanDesc = sceneDesc
-    .replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '')
-    .replace(/\[.*?\]/g, '')
-    .trim();
-
+  const cleanDesc = sceneDesc.replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '').replace(/\[.*?\]/g, '').trim();
   const prompt = [
     cleanDesc,
     'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, cinematic dark dramatic atmosphere, professional photography, photorealistic.',
@@ -381,44 +522,25 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
   });
 }
 
-/**
- * If the model returns a landscape or square image, crop it to a portrait 9:16 center crop
- * so it fills the 1080×1920 TikTok frame cleanly without appearing "split".
- * Uses ImageMagick (available on the GitHub Actions runner) for the crop.
- */
 async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
   try {
-    const { writeFileSync, readFileSync } = await import('fs');
-    const { join } = await import('path');
-    const { execSync } = await import('child_process');
-    const { tmpdir } = await import('os');
-
     const tmpIn = join(tmpdir(), `img_in_${Date.now()}.jpg`);
     const tmpOut = join(tmpdir(), `img_out_${Date.now()}.jpg`);
     writeFileSync(tmpIn, imgBuf);
-
-    // Resize to cover 1080×1920 keeping aspect ratio, then center-crop to exactly 1080×1920.
-    execSync(
-      `convert "${tmpIn}" -resize 1080x1920^ -gravity Center -extent 1080x1920 "${tmpOut}"`,
-      { timeout: 15000 }
-    );
-
+    execSync(`convert "${tmpIn}" -resize 1080x1920^ -gravity Center -extent 1080x1920 "${tmpOut}"`, { timeout: 15000 });
     const out = readFileSync(tmpOut);
-    // Clean up temp files
     try { execSync(`rm -f "${tmpIn}" "${tmpOut}"`); } catch { /* ignore */ }
     return out;
   } catch {
-    // If ImageMagick is not available or fails, return the original buffer unchanged.
     return imgBuf;
   }
 }
 
-// ─── Background Music ─────────────────────────────────────────────────────────
+// ─── Background Music ──────────────────────────────────────────────────────────
 
 async function downloadBackgroundMusic(tmpDir: string): Promise<string | null> {
   const trackUrl = BACKGROUND_MUSIC_TRACKS[Math.floor(Math.random() * BACKGROUND_MUSIC_TRACKS.length)];
   const musicPath = join(tmpDir, 'music.mp3');
-
   try {
     console.log(`     → Downloading background music...`);
     const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(15000) });
@@ -428,7 +550,7 @@ async function downloadBackgroundMusic(tmpDir: string): Promise<string | null> {
     }
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.byteLength < 10000) {
-      console.warn(`     ⚠ Music file too small (${buf.byteLength} bytes) — skipping`);
+      console.warn(`     ⚠ Music file too small — skipping`);
       return null;
     }
     writeFileSync(musicPath, buf);
@@ -449,18 +571,17 @@ async function assembleVideoWithRemotion(
   outputPath: string,
   script: string,
   title: string,
+  wordTimestamps: WordTimestamp[] | null,
 ): Promise<void> {
   const { bundle } = await import('@remotion/bundler') as any;
   const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
 
   const FPS = 30;
-  const OUTRO_SEC = 2.0; // extra seconds after voiceover ends for the CTA to hold
+  const OUTRO_SEC = 5.0;
 
-  // ── Get exact audio duration via ffprobe ───────────────────────────────────
-  // ffprobe is pre-installed on GitHub Actions ubuntu-latest runners.
   const audioBytes = readFileSync(audioPath).byteLength;
   const hasAudio = audioBytes > 1000;
-  let audioDurationSec = 35; // safe default
+  let audioDurationSec = 40;
 
   if (hasAudio) {
     try {
@@ -476,62 +597,55 @@ async function assembleVideoWithRemotion(
         throw new Error('ffprobe returned invalid value');
       }
     } catch {
-      // Fallback: bitrate estimate (192 kbps CBR → 24000 bytes/sec)
       audioDurationSec = Math.max((audioBytes * 8) / (192 * 1000), 20);
       console.log(`  Audio duration (estimated): ${audioDurationSec.toFixed(2)}s`);
     }
   }
 
-  const totalSec = Math.min(audioDurationSec + OUTRO_SEC, 82);
+  const totalSec = Math.min(audioDurationSec + OUTRO_SEC, 90);
   const durationInFrames = Math.ceil(totalSec * FPS);
   const audioDurationFrames = Math.round(audioDurationSec * FPS);
   console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${OUTRO_SEC}s outro)`);
 
-  // ── Pre-calculate subtitle timings ─────────────────────────────────────────
-  // Uses a words-per-second model matching UnrealSpeech Scarlett at Speed=-0.1.
-  // This is far more accurate than a character-count heuristic and ensures
-  // subtitles stay in sync with the actual voiceover.
-  const WORDS_PER_SEC = 2.4;  // Scarlett at Speed=-0.1, calibrated for accurate sync
-  const SUBTITLE_CHUNK = 3;   // 3 words per card — punchier TikTok style
+  // ── Build subtitle timings ────────────────────────────────────────────────
+  const SUBTITLE_CHUNK = 3;
   const cleanedScript = cleanVoiceoverScript(script);
-  const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
+  let subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
 
-  const subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
-  for (let i = 0; i < scriptWords.length; i += SUBTITLE_CHUNK) {
-    const chunk = scriptWords.slice(i, i + SUBTITLE_CHUNK);
-    const startSec = i / WORDS_PER_SEC;
-    const endSec = (i + chunk.length) / WORDS_PER_SEC;
-
-    // Don't show subtitles in the outro section
-    if (startSec >= audioDurationSec) break;
-
-    subtitleTimings.push({
-      text: chunk.join(' ').toUpperCase(),
-      startFrame: Math.round(startSec * FPS),
-      endFrame: Math.min(Math.round(endSec * FPS), audioDurationFrames),
-    });
-  }
-
-  // Safety: if computed subtitle end exceeds actual audio frames, scale all down
-  const lastTiming = subtitleTimings[subtitleTimings.length - 1];
-  if (lastTiming && lastTiming.endFrame > audioDurationFrames) {
-    const scale = audioDurationFrames / lastTiming.endFrame;
-    for (const t of subtitleTimings) {
-      t.startFrame = Math.round(t.startFrame * scale);
-      t.endFrame   = Math.round(t.endFrame   * scale);
+  if (wordTimestamps && wordTimestamps.length > 0) {
+    subtitleTimings = buildSubtitleTimingsFromWords(wordTimestamps, FPS, SUBTITLE_CHUNK);
+    console.log(`  Subtitle chunks: ${subtitleTimings.length} (real UnrealSpeech timestamps ✓)`);
+  } else {
+    const WORDS_PER_SEC = 2.4;
+    const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
+    for (let i = 0; i < scriptWords.length; i += SUBTITLE_CHUNK) {
+      const chunk = scriptWords.slice(i, i + SUBTITLE_CHUNK);
+      const startSec = i / WORDS_PER_SEC;
+      const endSec = (i + chunk.length) / WORDS_PER_SEC;
+      if (startSec >= audioDurationSec) break;
+      subtitleTimings.push({
+        text: chunk.join(' ').toUpperCase(),
+        startFrame: Math.round(startSec * FPS),
+        endFrame: Math.min(Math.round(endSec * FPS), audioDurationFrames),
+      });
     }
+    const lastT = subtitleTimings[subtitleTimings.length - 1];
+    if (lastT && lastT.endFrame > audioDurationFrames) {
+      const scale = audioDurationFrames / lastT.endFrame;
+      for (const t of subtitleTimings) {
+        t.startFrame = Math.round(t.startFrame * scale);
+        t.endFrame   = Math.round(t.endFrame   * scale);
+      }
+    }
+    console.log(`  Subtitle chunks: ${subtitleTimings.length} (heuristic fallback — timestamps unavailable)`);
   }
 
-  console.log(`  Subtitle chunks: ${subtitleTimings.length} (${SUBTITLE_CHUNK} words each)`);
-
-  // ── Convert assets to base64 data URLs ────────────────────────────────────
   console.log('  Converting assets to data URLs...');
 
   const scenes = imagePaths.map(p => {
     const data = readFileSync(p).toString('base64');
     return `data:image/jpeg;base64,${data}`;
   });
-
   console.log(`  → ${scenes.length} scene(s) loaded`);
 
   const audioSrc = hasAudio
@@ -548,7 +662,16 @@ async function assembleVideoWithRemotion(
     } catch { /* skip music if it fails */ }
   }
 
-  const inputProps = { scenes, audioSrc, musicSrc, script: cleanedScript, title, durationInFrames, subtitleTimings };
+  const inputProps = {
+    scenes,
+    audioSrc,
+    musicSrc,
+    script: cleanedScript,
+    title,
+    durationInFrames,
+    subtitleTimings,
+    audioDurationFrames,
+  };
 
   console.log('  Bundling Remotion composition...');
   const entryPoint = join(__dirname, 'remotion', 'root.tsx');
@@ -571,7 +694,7 @@ async function assembleVideoWithRemotion(
     codec: 'h264',
     outputLocation: outputPath,
     inputProps,
-    timeoutInMilliseconds: 15 * 60 * 1000,
+    timeoutInMilliseconds: 18 * 60 * 1000,
     chromiumOptions: { disableWebSecurity: true },
     onProgress: ({ renderedFrames, totalFrames }: any) => {
       if (renderedFrames % 150 === 0 || renderedFrames === totalFrames) {
@@ -701,65 +824,79 @@ async function runPipeline(schedule: any): Promise<void> {
     console.log(`     → "${title}" | ${scenes.length} scenes`);
     if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
 
-    // 3. Voiceover
-    console.log('  3/8 Generating voiceover (UnrealSpeech)...');
-    const audioBuffer = await generateVoiceover(script);
+    // 3. Voiceover + timestamps in parallel
+    console.log('  3/8 Generating voiceover + real timestamps (UnrealSpeech)...');
+    const [audioResult, timestampsResult] = await Promise.allSettled([
+      generateVoiceover(script),
+      fetchWordTimestamps(script),
+    ]);
+
+    if (audioResult.status === 'rejected') throw new Error(`Voiceover failed: ${audioResult.reason?.message}`);
+    const audioBuffer = audioResult.value;
+    const wordTimestamps: WordTimestamp[] | null = timestampsResult.status === 'fulfilled' ? timestampsResult.value : null;
+
     const audioPath = join(tmpDir, 'voice.mp3');
     writeFileSync(audioPath, audioBuffer);
-    console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB`);
+    console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB audio`);
+    if (wordTimestamps) console.log(`     → ${wordTimestamps.length} word timestamps ✓`);
 
-    // 4. Background music (parallel-friendly, non-critical)
+    // 4. Background music
     console.log('  4/8 Downloading background music...');
     const musicPath = await downloadBackgroundMusic(tmpDir);
 
-    // 5. Scene images — generate all 5 scenes
-    console.log(`  5/8 Generating ${scenes.length} scene images (Cloudflare AI)...`);
-    // Generate all scene images in parallel — 5x faster than sequential
-      const _imgResults = await Promise.allSettled(
-        scenes.map((scene, i) => generateImage(scene, i))
-      );
-      const imagePaths: string[] = [];
-      for (let i = 0; i < _imgResults.length; i++) {
-        const res = _imgResults[i];
-        if (res.status === 'fulfilled') {
-          const imgPath = join(tmpDir, `scene_${i}.jpg`);
-          writeFileSync(imgPath, res.value);
-          imagePaths.push(imgPath);
-          console.log(`     → Scene ${i + 1}/${scenes.length}: ${(res.value.byteLength / 1024).toFixed(0)} KB ✓`);
-        } else {
-          console.warn(`     ⚠ Scene ${i + 1} failed — using dark fallback`);
-          const pp = join(tmpDir, `scene_${i}.jpg`);
-          try {
-            execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${pp}" 2>/dev/null || true`);
-            if (require('fs').existsSync(pp) && require('fs').statSync(pp).size > 100) imagePaths.push(pp);
-          } catch { /* skip */ }
-        }
+    // 5. Caption & hashtags
+    console.log('  5/8 Generating viral caption and hashtags...');
+    const { caption, hashtags } = await generateCaptionAndHashtags(topic, niche, title, script);
+    console.log(`     → Caption: "${caption.slice(0, 60)}..."`);
+    console.log(`     → Hashtags: ${hashtags.split(' ').length} tags`);
+    if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
+
+    // 6. Scene images — all 5 in parallel
+    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI)...`);
+    const _imgResults = await Promise.allSettled(
+      scenes.map((scene, i) => generateImage(scene, i))
+    );
+    const imagePaths: string[] = [];
+    for (let i = 0; i < _imgResults.length; i++) {
+      const res = _imgResults[i];
+      if (res.status === 'fulfilled') {
+        const imgPath = join(tmpDir, `scene_${i}.jpg`);
+        writeFileSync(imgPath, res.value);
+        imagePaths.push(imgPath);
+        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(res.value.byteLength / 1024).toFixed(0)} KB ✓`);
+      } else {
+        console.warn(`     ⚠ Scene ${i + 1} failed — using dark fallback`);
+        const pp = join(tmpDir, `scene_${i}.jpg`);
+        try {
+          execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${pp}" 2>/dev/null || true`);
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          if (require('fs').existsSync(pp) && require('fs').statSync(pp).size > 100) imagePaths.push(pp);
+        } catch { /* skip */ }
       }
+    }
     if (imagePaths.length === 0) {
       throw new Error('All scene images failed to generate — cannot create video');
     }
-
-    // Log how many scenes we actually got
     console.log(`     → ${imagePaths.length} of ${scenes.length} scenes ready`);
 
-    // 6. Remotion video render
-    console.log('  6/8 Rendering professional video with Remotion...');
+    // 7. Remotion video render
+    console.log('  7/8 Rendering professional video with Remotion...');
     const videoPath = join(tmpDir, 'final.mp4');
-    await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title);
+    await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title, wordTimestamps);
     let _rawSize = readFileSync(videoPath).byteLength;
-      console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — compressing...`);
-      // FFmpeg CRF compression: smaller file, same visual quality, streaming-optimized
-      try {
-        const _cPath = videoPath.replace('.mp4', '_opt.mp4');
-        execSync(`ffmpeg -i "${videoPath}" -c:v libx264 -crf 26 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>/dev/null`, { timeout: 300000 });
-        const _cSize = readFileSync(_cPath).byteLength;
-        console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
-        execSync(`mv "${_cPath}" "${videoPath}"`);
-      } catch (_ce: any) { console.warn(`     ⚠ Compression skipped: ${_ce.message?.slice(0,60)}`); }
-      const videoSize = readFileSync(videoPath).byteLength;
+    console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — compressing...`);
+    try {
+      const _cPath = videoPath.replace('.mp4', '_opt.mp4');
+      execSync(`ffmpeg -i "${videoPath}" -c:v libx264 -crf 26 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>/dev/null`, { timeout: 300000 });
+      const _cSize = readFileSync(_cPath).byteLength;
+      console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
+      execSync(`mv "${_cPath}" "${videoPath}"`);
+    } catch (_ce: any) { console.warn(`     ⚠ Compression skipped: ${_ce.message?.slice(0,60)}`); }
+    const videoSize = readFileSync(videoPath).byteLength;
+    console.log(`     → Final: ${(videoSize/1024/1024).toFixed(1)} MB`);
 
-    // 7. Upload to Supabase Storage
-    console.log('  7/8 Uploading to Supabase Storage...');
+    // 8. Upload to Supabase Storage
+    console.log('  8/8 Uploading to Supabase Storage...');
     const timestamp = Date.now();
     const userId = schedule.user_id;
     const videoUrl = await uploadFile(videoPath, `videos/${userId}/${timestamp}.mp4`, 'video/mp4');
@@ -774,8 +911,8 @@ async function runPipeline(schedule: any): Promise<void> {
       }).eq('id', postId);
     }
 
-    // 8. Publish to TikTok
-    console.log('  8/8 Publishing to TikTok...');
+    // 9. Publish to TikTok
+    console.log('  Publishing to TikTok...');
     const { data: profile } = await supabase
       .from('profiles')
       .select('access_token')

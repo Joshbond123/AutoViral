@@ -516,54 +516,121 @@ async function generateImageWithCloudflare(sceneDesc: string, index: number): Pr
   });
 }
 
-async function generateImageWithPollinations(sceneDesc: string, index: number): Promise<Buffer> {
-  const prompt = buildImagePrompt(sceneDesc);
+async function generateImageWithPollinations(sceneDesc: string, index: number, simplify = false): Promise<Buffer> {
+  const baseDesc = simplify ? sceneDesc.slice(0, 200) : sceneDesc;
+  const prompt = simplify
+    ? `${baseDesc} dark cinematic dramatic atmosphere portrait 9:16 photorealistic no text no words`
+    : buildImagePrompt(baseDesc);
   const seed = Math.floor(Math.random() * 999999);
   const encodedPrompt = encodeURIComponent(prompt.slice(0, 1500));
-  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${seed}`;
+  const urlBase = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${seed}`;
 
-  const headers: Record<string, string> = {};
-  try {
-    const { data: polKeys } = await supabase
-      .from('api_keys')
-      .select('id, key_value, request_count, success_count, error_count')
-      .eq('service', 'pollinations')
-      .eq('is_active', true)
-      .neq('status', 'failed')
-      .order('request_count', { ascending: true })
-      .limit(1);
-    if (polKeys?.[0]?.key_value) {
-      headers['Authorization'] = `Bearer ${polKeys[0].key_value}`;
-      await supabase.from('api_keys').update({
-        request_count: (polKeys[0].request_count || 0) + 1,
-        success_count: (polKeys[0].success_count || 0) + 1,
-        status: 'active',
-        last_used_at: new Date().toISOString(),
-      }).eq('id', polKeys[0].id);
+  // Check if we have Pollinations keys configured for rotation
+  const { data: polKeyRows } = await supabase
+    .from('api_keys')
+    .select('id, key_value, request_count, success_count, error_count, status')
+    .eq('service', 'pollinations')
+    .eq('is_active', true)
+    .neq('status', 'failed')
+    .order('request_count', { ascending: true });
+
+  const hasKeys = (polKeyRows ?? []).length > 0;
+
+  if (hasKeys) {
+    // Use full key-rotation system
+    return tryWithKeys('pollinations', async (key) => {
+      console.log(`     → Pollinations AI (key-auth): scene ${index + 1}...`);
+      const resp = await fetch(urlBase, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(120000),
+      });
+      if (resp.status === 429) throw new Error(`Pollinations rate limited (429) for scene ${index + 1}`);
+      if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+      const imgBuf = Buffer.from(await resp.arrayBuffer());
+      if (imgBuf.byteLength < 5000) throw new Error(`Pollinations empty image (${imgBuf.byteLength} bytes)`);
+      console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+      return cropToPortrait(imgBuf);
+    });
+  }
+
+  // Anonymous free tier with exponential backoff
+  console.log(`     → Pollinations AI (anonymous): scene ${index + 1}...`);
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const resp = await fetch(urlBase, { signal: AbortSignal.timeout(120000) });
+    if (resp.status === 429) {
+      const delay = attempt * 8000;
+      console.warn(`     ⚠ Pollinations rate limited (attempt ${attempt}) — waiting ${delay / 1000}s`);
+      await new Promise(res => setTimeout(res, delay));
+      continue;
     }
-  } catch { /* no pollinations key configured — use anonymous free tier */ }
+    if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+    const imgBuf = Buffer.from(await resp.arrayBuffer());
+    if (imgBuf.byteLength < 5000) {
+      console.warn(`     ⚠ Pollinations empty image (attempt ${attempt}) — retrying`);
+      await new Promise(res => setTimeout(res, 4000));
+      continue;
+    }
+    console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+    return cropToPortrait(imgBuf);
+  }
+  throw new Error(`Pollinations failed after all retries for scene ${index + 1}`);
+}
 
-  console.log(`     → Pollinations AI: scene ${index + 1}...`);
-  const resp = await fetch(url, { headers, signal: AbortSignal.timeout(90000) });
-  if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
-
-  const imgBuf = Buffer.from(await resp.arrayBuffer());
-  if (imgBuf.byteLength < 5000) throw new Error(`Pollinations returned empty image (${imgBuf.byteLength} bytes)`);
-
-  console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-  return cropToPortrait(imgBuf);
+async function generateFallbackImage(index: number): Promise<Buffer> {
+  // Rich cinematic gradient — never a blank black frame
+  const gradients = [
+    'gradient:#0d0d2b-#1a0030',
+    'gradient:#0a1628-#1a2855',
+    'gradient:#1a0000-#3d0010',
+    'gradient:#001a1a-#00333a',
+    'gradient:#1a1500-#3d3000',
+  ];
+  const gradient = gradients[index % gradients.length];
+  const tmpOut = join(tmpdir(), `fallback_${Date.now()}_${index}.jpg`);
+  try {
+    execSync(`convert -size 1080x1920 "${gradient}" -quality 85 "${tmpOut}" 2>/dev/null`);
+    if (existsSync(tmpOut) && statSync(tmpOut).size > 500) {
+      const buf = readFileSync(tmpOut);
+      try { execSync(`rm -f "${tmpOut}"`); } catch { /* ignore */ }
+      return buf;
+    }
+  } catch { /* fall through */ }
+  // Absolute last resort — tiny valid JPEG via base64
+  return Buffer.from(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AJQAB/9k=',
+    'base64'
+  );
 }
 
 async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
-  // Step 1: Try Cloudflare AI with automatic key rotation
-  try {
-    return await generateImageWithCloudflare(sceneDesc, index);
-  } catch (cfErr: any) {
-    console.warn(`     ⚠ Cloudflare failed scene ${index + 1}: ${cfErr.message.slice(0, 80)} — falling back to Pollinations`);
+  const MAX_ATTEMPTS = 3;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const simplify = attempt > 1;
+
+    // Step 1: Cloudflare AI with key rotation
+    try {
+      return await generateImageWithCloudflare(sceneDesc, index);
+    } catch (cfErr: any) {
+      console.warn(`     ⚠ Cloudflare failed scene ${index + 1} (attempt ${attempt}): ${cfErr.message.slice(0, 80)}`);
+    }
+
+    // Step 2: Pollinations with key rotation + retry logic
+    try {
+      return await generateImageWithPollinations(sceneDesc, index, simplify);
+    } catch (polErr: any) {
+      console.warn(`     ⚠ Pollinations failed scene ${index + 1} (attempt ${attempt}): ${polErr.message.slice(0, 80)}`);
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = attempt * 6000;
+        console.warn(`     → Retrying scene ${index + 1} in ${delay / 1000}s...`);
+        await new Promise(res => setTimeout(res, delay));
+      }
+    }
   }
 
-  // Step 2: Pollinations AI fallback (free public API, no daily quota)
-  return generateImageWithPollinations(sceneDesc, index);
+  // All providers exhausted — return cinematic gradient (never blank)
+  console.warn(`     ⚠ Scene ${index + 1}: all providers failed — using cinematic gradient fallback`);
+  return generateFallbackImage(index);
 }
 
 async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
@@ -647,7 +714,7 @@ async function assembleVideoWithRemotion(
     }
   }
 
-  const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 90);
+  const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 120);
   const durationInFrames = Math.ceil(totalSec * FPS);
   const audioDurationFrames = Math.round(audioDurationSec * FPS);
   console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${AUDIO_BUFFER_SEC}s buffer + ${OUTRO_SEC}s outro)`);
@@ -887,28 +954,27 @@ async function runPipeline(schedule: any): Promise<void> {
     console.log(`     → Hashtags: ${hashtags.split(' ').length} tags`);
     if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
 
-    // 6. Scene images — staggered parallel (300ms apart for key rotation)
-    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI → Pollinations fallback)...`);
-    const _imgResults = await Promise.allSettled(
-      scenes.map((scene, i) =>
-        new Promise<void>(res => setTimeout(res, i * 300)).then(() => generateImage(scene, i))
-      )
-    );
+    // 6. Scene images — sequential with stagger to respect rate limits
+    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI → Pollinations → gradient fallback)...`);
     const imagePaths: string[] = [];
-    for (let i = 0; i < _imgResults.length; i++) {
-      const res = _imgResults[i];
-      if (res.status === 'fulfilled') {
+    for (let i = 0; i < scenes.length; i++) {
+      if (i > 0) await new Promise(res => setTimeout(res, 400)); // stagger requests
+      try {
+        const imgBuf = await generateImage(scenes[i], i);
         const imgPath = join(tmpDir, `scene_${i}.jpg`);
-        writeFileSync(imgPath, res.value);
+        writeFileSync(imgPath, imgBuf);
         imagePaths.push(imgPath);
-        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(res.value.byteLength / 1024).toFixed(0)} KB ✓`);
-      } else {
-        console.warn(`     ⚠ Scene ${i + 1} failed — using dark fallback`);
+        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+      } catch (e: any) {
+        // generateImage already tries all providers + gradient fallback — this should never fire
+        // but if it does, create a safe gradient fallback inline
+        console.warn(`     ⚠ Scene ${i + 1} unexpected error: ${e.message?.slice(0, 80)} — using inline gradient`);
         const pp = join(tmpDir, `scene_${i}.jpg`);
         try {
-          execSync(`convert -size 1080x1920 "xc:#0d0d1a" "${pp}" 2>/dev/null || true`);
-          if (existsSync(pp) && statSync(pp).size > 100) imagePaths.push(pp);
-        } catch { /* skip */ }
+          const gradients = ['gradient:#0d0d2b-#1a0030', 'gradient:#0a1628-#1a2855', 'gradient:#1a0000-#3d0010', 'gradient:#001a1a-#00333a', 'gradient:#1a1500-#3d3000'];
+          execSync(`convert -size 1080x1920 "${gradients[i % gradients.length]}" -quality 85 "${pp}" 2>/dev/null`);
+          if (existsSync(pp) && statSync(pp).size > 500) imagePaths.push(pp);
+        } catch { /* skip this scene */ }
       }
     }
     if (imagePaths.length === 0) {

@@ -68,7 +68,7 @@ export interface AppNotification {
 
 export interface ApiKey {
   id: string;
-  service: 'cerebras' | 'cloudflare' | 'cloudflare_id' | 'unrealspeech';
+  service: 'cerebras' | 'cloudflare' | 'cloudflare_id' | 'unrealspeech' | 'pollinations';
   key_value: string;
   is_active: boolean;
   status: 'active' | 'rate_limited' | 'failed';

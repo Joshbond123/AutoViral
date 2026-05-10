@@ -131,9 +131,15 @@ async function pickUniqueTopic(niche: string): Promise<string> {
 
   const used = (history ?? []).map((h: any) => h.topic_title.toLowerCase());
 
-  const prompt = `You are a TikTok content researcher for crypto scam awareness.
-Generate ONE specific, real-sounding viral topic title for the niche: "${niche}".
-The title should be dramatic, specific, and educational (warning people about scams).
+  const prompt = `You are a TikTok investigative journalist covering crypto scam awareness.
+Generate ONE specific, viral topic title for the niche: "${niche}".
+
+STRICT RULES:
+- Write as a dramatic NEWS HEADLINE or WARNING STATEMENT — NOT first-person
+- BANNED: "I", "me", "my", "I joined", "I lost", "I discovered", "I was scammed"
+- GOOD examples: "Fake Bitcoin ETF Wiped Out $2.3M in 48 Hours", "How Mirror Trading Scams Drain Wallets in Minutes", "The Fake Crypto Group Stealing Millions From Investors"
+- BAD examples: "I Lost My Savings to a Crypto Scam", "My Experience With a Fake Crypto Group"
+- Dramatic, specific, educational — warns viewers about a real scam technique
 AVOID these already-used topics: ${used.slice(0, 40).join(' | ')}
 Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 
@@ -155,7 +161,7 @@ Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 }
 
 async function generateScript(topic: string, niche: string): Promise<ScriptResult> {
-  const prompt = `You are a viral TikTok content creator for crypto scam awareness.
+  const prompt = `You are a professional TikTok investigative journalist creating viral crypto scam awareness content.
 
 Topic: "${topic}"
 Niche: ${niche}
@@ -163,11 +169,15 @@ Niche: ${niche}
 Write a complete TikTok video package. Follow every rule exactly.
 
 VOICEOVER RULES (the "script" field):
-- Pure natural spoken words only — exactly what the narrator says out loud to the camera
-- Start with a shocking hook (alarming question or fact) in the very first sentence
+- Pure natural spoken words only — exactly what the narrator says out loud
+- Start with a shocking hook — a dramatic fact, statistic, or urgent warning question
 - 130-160 words total (50-60 seconds when spoken at a normal pace)
-- Direct, personal — use "you", "your", speak to the viewer
-- IMPORTANT: End with EXACTLY these two sentences: "If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings."
+- Tone: professional, urgent, journalistic — like an investigative news reporter
+- Speak TO the viewer using "you" and "your" — warning and educating them
+- CRITICAL: NEVER use first-person narration — BANNED words: "I", "I've", "I was", "I lost", "I joined", "me", "my", "we joined", "our wallet"
+- The narrator is a journalist REPORTING on scams, NOT a victim telling their story
+- Be factual, specific, dramatic — name the scam type, explain how it works, warn the viewer
+- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings."
 - FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
@@ -180,8 +190,8 @@ SCENE RULES (the "scenes" array):
 
 Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 {
-  "title": "Viral TikTok title, under 80 characters, no emojis",
-  "script": "Pure spoken voiceover paragraph — no labels or directions",
+  "title": "Viral TikTok warning title, under 80 characters, no emojis, no first-person",
+  "script": "Pure spoken voiceover paragraph — journalistic, no first-person, no labels",
   "scenes": [
     "A hooded figure hunched over glowing monitors in a dark room, blue neon light, cinematic portrait",
     "A close-up of a person's devastated face illuminated by a phone screen, dramatic dark lighting",
@@ -460,13 +470,16 @@ function buildSubtitleTimingsFromWords(
   words: WordTimestamp[],
   fps: number,
   chunkSize: number = 1,
+  maxFrame?: number,
 ): Array<{ text: string; startFrame: number; endFrame: number }> {
   const timings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
   for (let i = 0; i < words.length; i += chunkSize) {
     const chunk = words.slice(i, i + chunkSize);
     const text = chunk.map(w => w.word).join(' ').toUpperCase();
     const startFrame = Math.round(chunk[0].start * fps);
-    const endFrame = Math.round(chunk[chunk.length - 1].end * fps);
+    let endFrame = Math.round(chunk[chunk.length - 1].end * fps);
+    // Clamp to maxFrame so subtitles never bleed into the outro zone
+    if (maxFrame !== undefined) endFrame = Math.min(endFrame, maxFrame);
     if (endFrame > startFrame) {
       timings.push({ text, startFrame, endFrame });
     }
@@ -682,7 +695,8 @@ async function assembleVideoWithRemotion(
 
   const FPS = 30;
   const OUTRO_SEC = 8.0;
-  const AUDIO_BUFFER_SEC = 1.5;
+  const OUTRO_MIN_FRAMES = Math.ceil(OUTRO_SEC * FPS); // guaranteed minimum outro frames
+  const AUDIO_BUFFER_SEC = 1.0;
 
   const audioBytes = readFileSync(audioPath).byteLength;
   const hasAudio = audioBytes > 1000;
@@ -705,11 +719,22 @@ async function assembleVideoWithRemotion(
     }
   }
 
-  // Cap at 90s total to stay within TikTok limits, give OUTRO_SEC for the outro card
+  // Use real word timestamps to correct audio duration — ffprobe can underestimate
+  if (wordTimestamps && wordTimestamps.length > 0) {
+    const lastWordEnd = wordTimestamps[wordTimestamps.length - 1].end;
+    if (lastWordEnd > audioDurationSec) {
+      audioDurationSec = lastWordEnd + 0.2; // slight padding after last word
+      console.log(`  Audio duration (timestamp-corrected): ${audioDurationSec.toFixed(2)}s`);
+    }
+  }
+
   const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 120);
   const durationInFrames = Math.ceil(totalSec * FPS);
-  const audioDurationFrames = Math.round(audioDurationSec * FPS);
-  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames (audio: ${audioDurationSec.toFixed(1)}s + ${AUDIO_BUFFER_SEC}s buffer + ${OUTRO_SEC}s outro)`);
+
+  // CRITICAL: clamp audioDurationFrames so the outro always gets OUTRO_MIN_FRAMES
+  const rawAudioFrames = Math.round(audioDurationSec * FPS);
+  const audioDurationFrames = Math.min(rawAudioFrames, durationInFrames - OUTRO_MIN_FRAMES);
+  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames | audio: ${audioDurationSec.toFixed(1)}s (${audioDurationFrames}f) | outro: ${((durationInFrames - audioDurationFrames) / FPS).toFixed(1)}s (${durationInFrames - audioDurationFrames}f)`);
 
   // ── Build subtitle timings ────────────────────────────────────────────────
   const SUBTITLE_CHUNK = 1;
@@ -717,8 +742,8 @@ async function assembleVideoWithRemotion(
   let subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
 
   if (wordTimestamps && wordTimestamps.length > 0) {
-    // Use real UnrealSpeech timestamps — most accurate
-    subtitleTimings = buildSubtitleTimingsFromWords(wordTimestamps, FPS, SUBTITLE_CHUNK);
+    // Use real UnrealSpeech timestamps — pass audioDurationFrames to prevent subtitle bleed
+    subtitleTimings = buildSubtitleTimingsFromWords(wordTimestamps, FPS, SUBTITLE_CHUNK, audioDurationFrames);
     console.log(`  Subtitle chunks: ${subtitleTimings.length} (real UnrealSpeech word timestamps ✓)`);
   } else {
     // Heuristic fallback: calibrated words-per-second for Will (male) voice
@@ -734,7 +759,6 @@ async function assembleVideoWithRemotion(
         endFrame: Math.min(Math.round(endSec * FPS), audioDurationFrames),
       });
     }
-    // Safety scale: clamp to audio duration
     const lastT = subtitleTimings[subtitleTimings.length - 1];
     if (lastT && lastT.endFrame > audioDurationFrames) {
       const scale = audioDurationFrames / lastT.endFrame;
@@ -754,7 +778,6 @@ async function assembleVideoWithRemotion(
     try { musicSrc = `data:audio/mpeg;base64,${readFileSync(musicPath).toString('base64')}`; } catch { /* skip */ }
   }
 
-  // Pass audioDurationFrames so TikTokVideo.tsx knows exactly when the outro starts
   const inputProps = {
     scenes,
     audioSrc,
@@ -783,6 +806,7 @@ async function assembleVideoWithRemotion(
     outputLocation: outputPath,
     inputProps,
     timeoutInMilliseconds: 18 * 60 * 1000,
+    concurrency: '100%',
     chromiumOptions: { disableWebSecurity: true },
     onProgress: ({ renderedFrames }: any) => {
       if (renderedFrames % 150 === 0 || renderedFrames === durationInFrames) {
@@ -934,16 +958,15 @@ async function runManualPipeline(job: any): Promise<void> {
     console.log('  5/8 Downloading background music...');
     const musicPath = await downloadBackgroundMusic(tmpDir);
 
-    // 6. Scene images — sequential with stagger to respect rate limits
-    console.log(`  6/8 Generating ${scenes.length} scene images (Cloudflare AI → Pollinations → gradient fallback)...`);
-    const imagePaths: string[] = [];
-    for (let i = 0; i < scenes.length; i++) {
-      if (i > 0) await new Promise(res => setTimeout(res, 400));
+    // 6. Scene images — fully parallel for maximum speed
+    console.log(`  6/8 Generating ${scenes.length} scene images in parallel (Cloudflare AI → Pollinations → gradient fallback)...`);
+    const imageSlots: Array<string | null> = new Array(scenes.length).fill(null);
+    await Promise.all(scenes.map(async (scene, i) => {
       try {
-        const imgBuf = await generateImage(scenes[i], i);
+        const imgBuf = await generateImage(scene, i);
         const imgPath = join(tmpDir, `scene_${i}.jpg`);
         writeFileSync(imgPath, imgBuf);
-        imagePaths.push(imgPath);
+        imageSlots[i] = imgPath;
         console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
       } catch (e: any) {
         console.warn(`     ⚠ Scene ${i + 1} unexpected error: ${e.message?.slice(0, 80)} — using inline gradient`);
@@ -951,10 +974,11 @@ async function runManualPipeline(job: any): Promise<void> {
         try {
           const gradients = ['gradient:#0d0d2b-#1a0030', 'gradient:#0a1628-#1a2855', 'gradient:#1a0000-#3d0010', 'gradient:#001a1a-#00333a', 'gradient:#1a1500-#3d3000'];
           execSync(`convert -size 1080x1920 "${gradients[i % gradients.length]}" -quality 85 "${pp}" 2>/dev/null`);
-          if (existsSync(pp) && statSync(pp).size > 500) imagePaths.push(pp);
+          if (existsSync(pp) && statSync(pp).size > 500) imageSlots[i] = pp;
         } catch { /* skip this scene */ }
       }
-    }
+    }));
+    const imagePaths = imageSlots.filter((p): p is string => p !== null);
     if (imagePaths.length === 0) {
       throw new Error('All scene images failed to generate — cannot create video');
     }
@@ -968,7 +992,7 @@ async function runManualPipeline(job: any): Promise<void> {
     console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — compressing...`);
     try {
       const _cPath = videoPath.replace('.mp4', '_opt.mp4');
-      execSync(`ffmpeg -i "${videoPath}" -c:v libx264 -crf 26 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>/dev/null`, { timeout: 300000 });
+      execSync(`ffmpeg -i "${videoPath}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>/dev/null`, { timeout: 300000 });
       const _cSize = readFileSync(_cPath).byteLength;
       console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
       execSync(`mv "${_cPath}" "${videoPath}"`);

@@ -184,22 +184,33 @@ VOICEOVER RULES (the "script" field):
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
 SCENE RULES (the "scenes" array):
-- Exactly 5 scenes
-- Each is a pure VISUAL description for an AI image generator — describe only what is SEEN
-- NO text, NO words, NO letters, NO numbers anywhere in any scene description
-- NO "Scene 1:" prefix or any labels — just the visual description directly
-- Portrait 9:16 cinematic style, dark dramatic atmosphere
+- Exactly 5 scenes — each scene MUST visually represent the SPECIFIC PART of the script being narrated at that moment
+- Scene 1 (script opening / shocking hook): Ultra-wide dramatic establishing shot that conveys the scale and shock of the scam
+- Scene 2 (explaining the scam mechanism): Extreme close-up showing the exact deception method — hands, devices, screens in action
+- Scene 3 (victim impact / human cost): Emotional medium shot — a real person's devastation, grief, or shock at financial loss
+- Scene 4 (the perpetrators / criminal side): Low-angle menacing shot — anonymous threatening figure, hidden identity, surveillance feel
+- Scene 5 (warning / closing CTA): High-angle or stark frontal symbolic shot — danger signal, vulnerability, urgent alarm
+- CRITICAL: Every scene MUST use a completely different visual composition, angle, and color palette — NO two scenes may look alike:
+  * Scene 1: ultra-wide angle, cold blue-teal environment, vast dark atmosphere
+  * Scene 2: extreme close-up macro, warm amber-orange glow on screens or hands
+  * Scene 3: medium shot, desaturated muted tones, soft dramatic rim lighting
+  * Scene 4: low angle, deep crimson-red accent light, high contrast threatening shadows
+  * Scene 5: overhead or stark frontal, bold red-orange warning palette, geometric composition
+- Each scene description must be highly specific: exact subject, action, lighting angle, atmosphere, and unique visual detail
+- Pure VISUAL description only — NO text, NO words, NO letters, NO numbers in any scene description
+- NO "Scene 1:" prefix or labels — just the visual description directly
+- Portrait 9:16 cinematic aspect ratio, photorealistic
 
 Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 {
   "title": "Viral TikTok warning title, under 80 characters, no emojis, no first-person",
   "script": "Pure spoken voiceover paragraph — journalistic, no first-person, no labels",
   "scenes": [
-    "A hooded figure hunched over glowing monitors in a dark room, blue neon light, cinematic portrait",
-    "A close-up of a person's devastated face illuminated by a phone screen, dramatic dark lighting",
-    "Golden coins dissolving into shadow, slow motion, dark cinematic atmosphere, vertical portrait",
-    "Two silhouetted figures exchanging something in a dimly lit alley, suspicious, cinematic",
-    "An empty wallet and a cracked phone screen lying on a dark table, dramatic low lighting"
+    "Ultra-wide shot of a massive dark server room with thousands of blinking lights stretching to the horizon, one lone figure hunched at a glowing terminal in the distance, cold blue-teal atmosphere",
+    "Extreme close-up of trembling fingers scrolling a phone screen showing a crypto wallet draining in real time, warm amber backlight, shallow depth of field, sweat on fingertip",
+    "Medium shot of a middle-aged person sitting alone at a kitchen table at night, head in hands, soft desaturated light, crumpled papers and empty coffee mug visible, emotional despair",
+    "Low-angle shot looking up at a silhouetted hooded figure standing against a bank of glowing red monitors, crimson light casting harsh shadows upward, menacing and anonymous",
+    "Overhead aerial shot looking straight down at an empty leather wallet lying open on black marble, single golden coin beside it, stark red-orange rim light, geometric and symbolic"
   ]
 }`;
 
@@ -291,15 +302,16 @@ CAPTION RULES:
 - Pure text, highly engaging
 
 HASHTAG RULES:
-- Exactly 12 hashtags
-- Mix of: high-volume TikTok tags, niche-specific tags, and trending crypto/scam awareness tags
-- Include: #cryptoscam #cryptowarning #scamalert and relevant niche tags
+- Exactly 5 hashtags — no more, no less
+- Use broad, high-volume crypto community hashtags that maximize reach
+- Always include #crypto and #blockchain
+- The remaining 3 should be popular crypto terms such as #bitcoin #ethereum #web3 #defi #altcoin #nft #cryptonews #cryptotrading #btc or similar high-traffic tags
 - Format: space-separated on one line
 
 Return ONLY valid JSON, no markdown, no explanation:
 {
   "caption": "your caption here",
-  "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5 #tag6 #tag7 #tag8 #tag9 #tag10 #tag11 #tag12"
+  "hashtags": "#crypto #blockchain #bitcoin #ethereum #cryptonews"
 }`;
 
   try {
@@ -321,7 +333,7 @@ Return ONLY valid JSON, no markdown, no explanation:
         const parsed = JSON.parse(match[0]);
         return {
           caption: (parsed.caption || `${title} - This crypto scam could steal everything from you. Share to protect others. Follow for daily crypto scam warnings.`).slice(0, 150),
-          hashtags: parsed.hashtags || '#cryptoscam #cryptowarning #scamalert #cryptoeducation #cryptosafety #bitcoinscam #cryptofraud #scamexposed #cryptonews #digitalcrime #onlinescam #protectyourself',
+          hashtags: parsed.hashtags || '#crypto #blockchain #bitcoin #ethereum #cryptonews',
         };
       }
       throw new Error('No JSON in response');
@@ -330,7 +342,7 @@ Return ONLY valid JSON, no markdown, no explanation:
     console.warn(`  ⚠ Caption generation failed: ${e.message} — using defaults`);
     return {
       caption: `${title.slice(0, 100)} - This crypto scam has already stolen millions. Share to warn others. Follow for daily crypto scam warnings.`,
-      hashtags: '#cryptoscam #cryptowarning #scamalert #cryptoeducation #cryptosafety #bitcoinscam #cryptofraud #scamexposed #cryptonews #digitalcrime #onlinescam #protectyourself',
+      hashtags: '#crypto #blockchain #bitcoin #ethereum #cryptonews',
     };
   }
 }
@@ -482,11 +494,22 @@ function buildSubtitleTimingsFromWords(
 
 // ─── Image Generation ──────────────────────────────────────────────────────────
 
-function buildImagePrompt(sceneDesc: string): string {
+// Per-scene cinematic style — each index gets a fundamentally different look
+const SCENE_CINEMATIC_STYLES = [
+  'ultra-wide angle lens, vast dark environment, cold blue-teal color grade, extreme depth of field, large scale and distance',
+  'extreme close-up macro shot, warm amber-orange glow, very shallow depth of field, fine texture visible, intimate and intense',
+  'medium shot, desaturated muted gray tones, soft dramatic rim lighting from one side, human emotional weight, documentary style',
+  'low-angle looking upward, deep crimson-red accent light casting harsh upward shadows, menacing and threatening perspective',
+  'overhead bird-eye or stark frontal view, bold red-orange warning color palette, geometric and symbolic composition, graphic impact',
+];
+
+function buildImagePrompt(sceneDesc: string, index: number = 0): string {
   const cleanDesc = sceneDesc.replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '').replace(/\[.*?\]/g, '').trim();
+  const styleModifier = SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length];
   return [
     cleanDesc,
-    'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, cinematic dark dramatic atmosphere, professional photography, photorealistic.',
+    styleModifier + '.',
+    'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, professional cinematic photography, photorealistic, ultra high quality.',
     'STRICT: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels, NO signs, NO titles anywhere in the image — pure visual only.',
     'Do NOT split into panels or multiple images. Single full-frame portrait scene only.',
     'Do NOT include any writing, typography, or overlaid text of any kind.',
@@ -494,7 +517,7 @@ function buildImagePrompt(sceneDesc: string): string {
 }
 
 async function generateImageWithCloudflare(sceneDesc: string, index: number): Promise<Buffer> {
-  const prompt = buildImagePrompt(sceneDesc);
+  const prompt = buildImagePrompt(sceneDesc, index);
 
   return tryWithKeys('cloudflare', async (cfToken) => {
     const { data: idKeys } = await supabase
@@ -532,8 +555,8 @@ async function generateImageWithCloudflare(sceneDesc: string, index: number): Pr
 async function generateImageWithPollinations(sceneDesc: string, index: number, simplify = false): Promise<Buffer> {
   const baseDesc = simplify ? sceneDesc.slice(0, 200) : sceneDesc;
   const prompt = simplify
-    ? `${baseDesc} dark cinematic dramatic atmosphere portrait 9:16 photorealistic no text no words`
-    : buildImagePrompt(baseDesc);
+    ? `${baseDesc} ${SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length]} portrait 9:16 photorealistic no text no words`
+    : buildImagePrompt(baseDesc, index);
   const seed = Math.floor(Math.random() * 999999);
   const encodedPrompt = encodeURIComponent(prompt.slice(0, 1500));
   const urlBase = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${seed}`;

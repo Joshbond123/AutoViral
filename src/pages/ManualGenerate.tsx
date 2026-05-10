@@ -883,7 +883,7 @@ export default function ManualGenerate() {
   };
 
   const activeJobs = jobs.filter(j => j.status === 'pending' || j.status === 'running');
-  const instantJobs = jobs.filter(j => isInstantJob(j));
+  const instantJobs = jobs.filter(j => isInstantJob(j)).slice(0, 5);
   const scheduledJobs = jobs.filter(j => !isInstantJob(j));
 
   return (
@@ -1087,7 +1087,7 @@ export default function ManualGenerate() {
                   <div className="flex items-center gap-2 px-1">
                     <Zap size={13} className="text-brand-primary" />
                     <span className="text-xs font-bold uppercase tracking-widest text-brand-primary font-mono">Instant Jobs</span>
-                    <span className="text-[10px] text-white/20 font-mono">({instantJobs.length})</span>
+                    <span className="text-[10px] text-white/20 font-mono">5 most recent</span>
                   </div>
                   <div className="glass rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
                     {instantJobs.map(job => (

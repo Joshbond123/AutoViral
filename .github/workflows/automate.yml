@@ -10,7 +10,8 @@ on:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # FIX: Increased from 40 → 58 minutes (Remotion render + upload can exceed 40min)
+    timeout-minutes: 58
 
     steps:
       - name: Checkout code
@@ -28,7 +29,7 @@ jobs:
       - name: Install tsx globally
         run: npm install -g tsx
 
-      - name: Install Chromium system dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
@@ -36,11 +37,30 @@ jobs:
             libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
             libxdamage1 libxfixes3 libxrandr2 libgbm1 \
             libpango-1.0-0 libcairo2 libasound2t64 \
-            fonts-liberation fonts-dejavu fontconfig imagemagick
+            fonts-liberation fonts-dejavu fontconfig \
+            imagemagick ffmpeg xvfb
           fc-cache -f
+          # Verify critical tools
+          convert --version | head -1
+          ffmpeg -version | head -1
+          echo "System deps ready"
 
       - name: Run AutoViral Pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/automate.ts
+          # Chromium sandbox workaround for GitHub Actions runners
+          CHROME_FLAGS: "--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage"
+          # Remotion prefers swiftshader for headless rendering
+          REMOTION_GL: swiftshader
+        run: |
+          # Start Xvfb virtual display for Chromium headless rendering stability
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          XVFB_PID=$!
+          sleep 2
+          echo "Xvfb started (PID: $XVFB_PID)"
+
+          npx tsx scripts/automate.ts
+
+          kill $XVFB_PID 2>/dev/null || true

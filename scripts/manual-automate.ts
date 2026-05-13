@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { writeFileSync, readFileSync, mkdirSync, existsSync, statSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'fs';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
@@ -29,7 +29,6 @@ const NICHES = [
 ];
 
 const BACKGROUND_MUSIC_TRACKS = [
-  // SoundHelix — public domain, no auth required, reliable CDN
   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
@@ -339,7 +338,6 @@ Return ONLY valid JSON, no markdown, no explanation:
   try {
     return await tryWithKeys('cerebras', async (key) => {
       const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 400);
-
       const match = content.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
@@ -354,7 +352,7 @@ Return ONLY valid JSON, no markdown, no explanation:
     console.warn(`  ⚠ Caption generation failed: ${e.message} — using defaults`);
     return {
       caption: `${title.slice(0, 100)} - This crypto scam has already stolen millions. Share to warn others. Follow for daily crypto scam warnings.`,
-      hashtags: '#crypto #blockchain #bitcoin #ethereum #cryptonews',
+      hashtags: '#cryptoscam #crypto #scamalert #cryptofraud #cryptoawareness',
     };
   }
 }
@@ -403,20 +401,10 @@ interface VoiceoverResult {
   wordTimestamps: WordTimestamp[] | null;
 }
 
-/**
- * Generates voiceover and retrieves real word-level timestamps in a single call
- * via UnrealSpeech /synthesisTasks endpoint (async, polls until complete).
- *
- * API: POST /synthesisTasks → { SynthesisTask: { OutputUri, TimestampsUri, TaskId, TaskStatus } }
- * Timestamps JSON: [{ word, start, end, text_offset }, ...]
- *
- * Falls back to /speech only if synthesisTasks fails.
- */
 async function generateVoiceoverWithTimestamps(script: string): Promise<VoiceoverResult> {
   const cleanScript = cleanVoiceoverScript(script);
 
   return tryWithKeys('unrealspeech', async (key) => {
-    // ── Step 1: Submit synthesis task ──────────────────────────────────────
     const initResp = await fetch('https://api.v6.unrealspeech.com/synthesisTasks', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -433,12 +421,12 @@ async function generateVoiceoverWithTimestamps(script: string): Promise<Voiceove
     const taskId = task.TaskId;
     if (!taskId) throw new Error(`UnrealSpeech: no TaskId in response — ${JSON.stringify(initJson).slice(0, 200)}`);
 
-    // ── Step 2: Poll until completed (max 90s) ────────────────────────────
     let outputUri: string = task.OutputUri ?? '';
     let timestampsUri: string = task.TimestampsUri ?? '';
     let taskStatus: string = task.TaskStatus ?? 'scheduled';
 
-    const MAX_POLLS = 60;
+    // Poll up to 90s (30 polls × 3s)
+    const MAX_POLLS = 30;
     for (let i = 0; i < MAX_POLLS && taskStatus !== 'completed'; i++) {
       await new Promise(res => setTimeout(res, 3000));
       const pollResp = await fetch(`https://api.v6.unrealspeech.com/synthesisTasks/${taskId}`, {
@@ -450,22 +438,22 @@ async function generateVoiceoverWithTimestamps(script: string): Promise<Voiceove
       taskStatus = pollTask.TaskStatus ?? taskStatus;
       if (pollTask.OutputUri) outputUri = pollTask.OutputUri;
       if (pollTask.TimestampsUri) timestampsUri = pollTask.TimestampsUri;
+      if (taskStatus === 'completed') break;
+      if (taskStatus === 'failed') throw new Error(`UnrealSpeech synthesis task failed (TaskId: ${taskId})`);
     }
 
     if (!outputUri) throw new Error(`UnrealSpeech: synthesis task never completed (TaskId: ${taskId})`);
 
-    // ── Step 3: Download audio ────────────────────────────────────────────
     console.log(`     → Downloading audio from S3...`);
-    const audioResp = await fetch(outputUri, { signal: AbortSignal.timeout(30000) });
+    const audioResp = await fetch(outputUri, { signal: AbortSignal.timeout(45000) });
     if (!audioResp.ok) throw new Error(`S3 audio download failed: ${audioResp.status}`);
     const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
     if (audioBuffer.byteLength < 1000) throw new Error(`UnrealSpeech S3 audio empty (${audioBuffer.byteLength} bytes)`);
 
-    // ── Step 4: Download and parse timestamps ─────────────────────────────
     let wordTimestamps: WordTimestamp[] | null = null;
     if (timestampsUri) {
       try {
-        const tsResp = await fetch(timestampsUri, { signal: AbortSignal.timeout(15000) });
+        const tsResp = await fetch(timestampsUri, { signal: AbortSignal.timeout(20000) });
         if (tsResp.ok) {
           const tsData = await tsResp.json() as any;
           const raw: Array<any> = Array.isArray(tsData) ? tsData : (tsData.words ?? []);
@@ -502,7 +490,6 @@ function buildSubtitleTimingsFromWords(
     const text = chunk.map(w => w.word).join(' ').toUpperCase();
     const startFrame = Math.round(chunk[0].start * fps);
     let endFrame = Math.round(chunk[chunk.length - 1].end * fps);
-    // Clamp to maxFrame so subtitles never bleed into the outro zone
     if (maxFrame !== undefined) endFrame = Math.min(endFrame, maxFrame);
     if (endFrame > startFrame) {
       timings.push({ text, startFrame, endFrame });
@@ -513,7 +500,6 @@ function buildSubtitleTimingsFromWords(
 
 // ─── Image Generation ──────────────────────────────────────────────────────────
 
-// Per-scene cinematic style — each index gets a fundamentally different look
 const SCENE_CINEMATIC_STYLES = [
   'ultra-wide angle lens, vast dark environment, cold blue-teal color grade, extreme depth of field, large scale and distance',
   'extreme close-up macro shot, warm amber-orange glow, very shallow depth of field, fine texture visible, intimate and intense',
@@ -522,7 +508,6 @@ const SCENE_CINEMATIC_STYLES = [
   'overhead bird-eye or stark frontal view, bold red-orange warning color palette, geometric and symbolic composition, graphic impact',
 ];
 
-// Unique atmospheric variations injected per video to ensure no two videos look the same
 const ATMOSPHERIC_VARIATIONS = [
   'volumetric light rays piercing through dense atmosphere',
   'dust particles visible drifting through frame in foreground',
@@ -553,6 +538,7 @@ function buildImagePrompt(sceneDesc: string, index: number = 0, videoVariant: nu
   ].join(' ');
 }
 
+// FIX: num_steps corrected from 28 → 4 (Flux-1-Schnell is a 1-4 step model; 28 steps wastes quota and causes failures)
 async function generateImageWithCloudflare(sceneDesc: string, index: number, videoVariant: number = 0): Promise<Buffer> {
   const prompt = buildImagePrompt(sceneDesc, index, videoVariant);
 
@@ -572,18 +558,19 @@ async function generateImageWithCloudflare(sceneDesc: string, index: number, vid
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, num_steps: 28 }),
+        // FIX: 4 steps is optimal for Flux-1-Schnell
+        body: JSON.stringify({ prompt, num_steps: 4 }),
       }
     );
     if (!resp.ok) throw new Error(`Cloudflare image (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
 
     const ct = resp.headers.get('content-type') ?? '';
     if (ct.includes('image/')) {
-      return cropToPortrait(Buffer.from(await resp.arrayBuffer()));
+      return cropAndCompressToPortrait(Buffer.from(await resp.arrayBuffer()));
     }
     const json = await resp.json() as any;
     if (json?.result?.image) {
-      return cropToPortrait(Buffer.from(json.result.image, 'base64'));
+      return cropAndCompressToPortrait(Buffer.from(json.result.image, 'base64'));
     }
     throw new Error(`Unexpected Cloudflare response for scene ${index + 1}`);
   });
@@ -594,10 +581,10 @@ async function generateImageWithPollinations(sceneDesc: string, index: number, s
   const prompt = simplify
     ? `${baseDesc} ${SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length]} portrait 9:16 photorealistic no text no words`
     : buildImagePrompt(baseDesc, index, videoVariant);
-  // Incorporate videoVariant into seed so the same scene desc produces different images across videos
   const seed = (Math.floor(Math.random() * 899999) + 100000) ^ (videoVariant * 7919);
   const encodedPrompt = encodeURIComponent(prompt.slice(0, 1500));
-  const urlBase = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${seed}`;
+  // FIX: Use flux-realism for better cinematic quality
+  const urlBase = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux-realism&nologo=true&seed=${seed}`;
 
   const { data: polKeyRows } = await supabase
     .from('api_keys')
@@ -621,28 +608,33 @@ async function generateImageWithPollinations(sceneDesc: string, index: number, s
       const imgBuf = Buffer.from(await resp.arrayBuffer());
       if (imgBuf.byteLength < 5000) throw new Error(`Pollinations empty image (${imgBuf.byteLength} bytes)`);
       console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-      return cropToPortrait(imgBuf);
+      return cropAndCompressToPortrait(imgBuf);
     });
   }
 
   console.log(`     → Pollinations AI (anonymous): scene ${index + 1}...`);
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    const resp = await fetch(urlBase, { signal: AbortSignal.timeout(120000) });
-    if (resp.status === 429) {
-      const delay = attempt * 8000;
-      console.warn(`     ⚠ Pollinations rate limited (attempt ${attempt}) — waiting ${delay / 1000}s`);
-      await new Promise(res => setTimeout(res, delay));
-      continue;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const resp = await fetch(urlBase, { signal: AbortSignal.timeout(120000) });
+      if (resp.status === 429) {
+        const delay = Math.min(attempt * 8000, 40000);
+        console.warn(`     ⚠ Pollinations rate limited (attempt ${attempt}) — waiting ${delay / 1000}s`);
+        await new Promise(res => setTimeout(res, delay));
+        continue;
+      }
+      if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+      const imgBuf = Buffer.from(await resp.arrayBuffer());
+      if (imgBuf.byteLength < 5000) {
+        console.warn(`     ⚠ Pollinations empty image (attempt ${attempt}) — retrying`);
+        await new Promise(res => setTimeout(res, 4000));
+        continue;
+      }
+      console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+      return cropAndCompressToPortrait(imgBuf);
+    } catch (e: any) {
+      if (attempt === 5) throw e;
+      await new Promise(res => setTimeout(res, attempt * 4000));
     }
-    if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
-    const imgBuf = Buffer.from(await resp.arrayBuffer());
-    if (imgBuf.byteLength < 5000) {
-      console.warn(`     ⚠ Pollinations empty image (attempt ${attempt}) — retrying`);
-      await new Promise(res => setTimeout(res, 4000));
-      continue;
-    }
-    console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-    return cropToPortrait(imgBuf);
   }
   throw new Error(`Pollinations failed after all retries for scene ${index + 1}`);
 }
@@ -658,10 +650,10 @@ async function generateFallbackImage(index: number): Promise<Buffer> {
   const gradient = gradients[index % gradients.length];
   const tmpOut = join(tmpdir(), `fallback_${Date.now()}_${index}.jpg`);
   try {
-    execSync(`convert -size 1080x1920 "${gradient}" -quality 85 "${tmpOut}" 2>/dev/null`);
+    execSync(`convert -size 1080x1920 "${gradient}" -quality 75 "${tmpOut}" 2>/dev/null`);
     if (existsSync(tmpOut) && statSync(tmpOut).size > 500) {
       const buf = readFileSync(tmpOut);
-      try { execSync(`rm -f "${tmpOut}"`); } catch { /* ignore */ }
+      try { unlinkSync(tmpOut); } catch { /* ignore */ }
       return buf;
     }
   } catch { /* fall through */ }
@@ -699,30 +691,37 @@ async function generateImage(sceneDesc: string, index: number, videoVariant: num
   return generateFallbackImage(index);
 }
 
-async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
+// FIX: Combined crop + compress to reduce base64 props size passed to Remotion
+async function cropAndCompressToPortrait(imgBuf: Buffer): Promise<Buffer> {
+  const tmpIn = join(tmpdir(), `img_in_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
+  const tmpOut = join(tmpdir(), `img_out_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
   try {
-    const tmpIn = join(tmpdir(), `img_in_${Date.now()}.jpg`);
-    const tmpOut = join(tmpdir(), `img_out_${Date.now()}.jpg`);
     writeFileSync(tmpIn, imgBuf);
-    execSync(`convert "${tmpIn}" -resize 1080x1920^ -gravity Center -extent 1080x1920 "${tmpOut}"`, { timeout: 15000 });
-    const out = readFileSync(tmpOut);
-    try { execSync(`rm -f "${tmpIn}" "${tmpOut}"`); } catch { /* ignore */ }
-    return out;
-  } catch {
-    return imgBuf;
+    execSync(
+      `convert "${tmpIn}" -resize 1080x1920^ -gravity Center -extent 1080x1920 -quality 75 -strip "${tmpOut}"`,
+      { timeout: 20000 }
+    );
+    if (existsSync(tmpOut) && statSync(tmpOut).size > 500) {
+      const out = readFileSync(tmpOut);
+      try { unlinkSync(tmpIn); unlinkSync(tmpOut); } catch { /* ignore */ }
+      return out;
+    }
+  } catch (e: any) {
+    console.warn(`     ⚠ Image crop/compress failed: ${e.message?.slice(0, 60)} — using original`);
+    try { if (existsSync(tmpIn)) unlinkSync(tmpIn); if (existsSync(tmpOut)) unlinkSync(tmpOut); } catch { /* ignore */ }
   }
+  return imgBuf;
 }
 
 // ─── Background Music ──────────────────────────────────────────────────────────
 
 async function downloadBackgroundMusic(tmpDir: string): Promise<string | null> {
   const musicPath = join(tmpDir, 'music.mp3');
-  // Shuffle all tracks so we try them in a random order, falling back through each
   const shuffled = [...BACKGROUND_MUSIC_TRACKS].sort(() => Math.random() - 0.5);
   for (const trackUrl of shuffled) {
     try {
       console.log(`     → Downloading music: ${trackUrl.split('/').pop()}...`);
-      const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(35000) });
+      const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(45000) });
       if (!resp.ok) {
         console.warn(`     ⚠ Music track HTTP ${resp.status} — trying next`);
         continue;
@@ -764,7 +763,7 @@ async function assembleVideoWithRemotion(
 
   const FPS = 30;
   const OUTRO_SEC = 8.0;
-  const OUTRO_MIN_FRAMES = Math.ceil(OUTRO_SEC * FPS); // guaranteed minimum outro frames
+  const OUTRO_MIN_FRAMES = Math.ceil(OUTRO_SEC * FPS);
   const AUDIO_BUFFER_SEC = 1.0;
 
   const audioBytes = readFileSync(audioPath).byteLength;
@@ -775,7 +774,7 @@ async function assembleVideoWithRemotion(
     try {
       const ffOut = execSync(
         `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`,
-        { timeout: 12000 }
+        { timeout: 15000 }
       ).toString().trim();
       const probed = parseFloat(ffOut);
       if (isFinite(probed) && probed > 3) {
@@ -788,11 +787,10 @@ async function assembleVideoWithRemotion(
     }
   }
 
-  // Use real word timestamps to correct audio duration — ffprobe can underestimate
   if (wordTimestamps && wordTimestamps.length > 0) {
     const lastWordEnd = wordTimestamps[wordTimestamps.length - 1].end;
     if (lastWordEnd > audioDurationSec) {
-      audioDurationSec = lastWordEnd + 0.2; // slight padding after last word
+      audioDurationSec = lastWordEnd + 0.2;
       console.log(`  Audio duration (timestamp-corrected): ${audioDurationSec.toFixed(2)}s`);
     }
   }
@@ -800,10 +798,9 @@ async function assembleVideoWithRemotion(
   const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 120);
   const durationInFrames = Math.ceil(totalSec * FPS);
 
-  // CRITICAL: clamp audioDurationFrames so the outro always gets OUTRO_MIN_FRAMES
   const rawAudioFrames = Math.round(audioDurationSec * FPS);
   const audioDurationFrames = Math.min(rawAudioFrames, durationInFrames - OUTRO_MIN_FRAMES);
-  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames | audio: ${audioDurationSec.toFixed(1)}s (${audioDurationFrames}f) | outro: ${((durationInFrames - audioDurationFrames) / FPS).toFixed(1)}s (${durationInFrames - audioDurationFrames}f)`);
+  console.log(`  Video: ${totalSec.toFixed(1)}s total → ${durationInFrames} frames | audio: ${audioDurationSec.toFixed(1)}s (${audioDurationFrames}f) | outro: ${((durationInFrames - audioDurationFrames) / FPS).toFixed(1)}s`);
 
   // ── Build subtitle timings ────────────────────────────────────────────────
   const SUBTITLE_CHUNK = 1;
@@ -811,11 +808,9 @@ async function assembleVideoWithRemotion(
   let subtitleTimings: Array<{ text: string; startFrame: number; endFrame: number }> = [];
 
   if (wordTimestamps && wordTimestamps.length > 0) {
-    // Use real UnrealSpeech timestamps — pass audioDurationFrames to prevent subtitle bleed
     subtitleTimings = buildSubtitleTimingsFromWords(wordTimestamps, FPS, SUBTITLE_CHUNK, audioDurationFrames);
     console.log(`  Subtitle chunks: ${subtitleTimings.length} (real UnrealSpeech word timestamps ✓)`);
   } else {
-    // Heuristic fallback: calibrated words-per-second for Will (male) voice
     const WORDS_PER_SEC = 2.8;
     const scriptWords = cleanedScript.split(/\s+/).filter(Boolean);
     for (let i = 0; i < scriptWords.length; i++) {
@@ -836,15 +831,19 @@ async function assembleVideoWithRemotion(
         t.endFrame   = Math.round(t.endFrame   * scale);
       }
     }
-    console.log(`  Subtitle chunks: ${subtitleTimings.length} (heuristic 1-word fallback — timestamps unavailable)`);
+    console.log(`  Subtitle chunks: ${subtitleTimings.length} (heuristic 1-word fallback)`);
   }
 
   console.log('  Converting assets to data URLs...');
   const scenes = imagePaths.map(p => `data:image/jpeg;base64,${readFileSync(p).toString('base64')}`);
+  console.log(`  → ${scenes.length} scene(s) loaded (avg ${Math.round(scenes.reduce((s, sc) => s + sc.length, 0) / scenes.length / 1024)}KB each)`);
+
   const audioSrc = hasAudio ? `data:audio/mpeg;base64,${readFileSync(audioPath).toString('base64')}` : '';
+  if (!hasAudio) console.warn('  ⚠ Audio file empty — rendering without voiceover');
+
   let musicSrc = '';
   if (musicPath) {
-    try { musicSrc = `data:audio/mpeg;base64,${readFileSync(musicPath).toString('base64')}`; } catch { /* skip */ }
+    try { musicSrc = `data:audio/mpeg;base64,${readFileSync(musicPath).toString('base64')}`; console.log('  → Background music loaded'); } catch { /* skip */ }
   }
 
   const inputProps = {
@@ -867,19 +866,26 @@ async function assembleVideoWithRemotion(
 
   const composition = await selectComposition({ serveUrl: bundleLocation, id: 'TikTokVideo', inputProps });
 
-  console.log(`  Rendering ${durationInFrames} frames at 1080×1920...`);
+  // FIX: concurrency raised from 1 → 2 for ~50% faster rendering
+  console.log(`  Rendering ${durationInFrames} frames at 1080×1920 (concurrency: 2)...`);
   await renderMedia({
     composition,
     serveUrl: bundleLocation,
     codec: 'h264',
     outputLocation: outputPath,
     inputProps,
-    timeoutInMilliseconds: 18 * 60 * 1000,
-    concurrency: 1,
-    chromiumOptions: { disableWebSecurity: true, gl: 'swiftshader' },
+    timeoutInMilliseconds: 20 * 60 * 1000,
+    concurrency: 2,
+    chromiumOptions: {
+      disableWebSecurity: true,
+      gl: 'swiftshader',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    },
     onProgress: ({ renderedFrames }: any) => {
-      if (renderedFrames % 150 === 0 || renderedFrames === durationInFrames) {
-        console.log(`    ↳ ${renderedFrames}/${durationInFrames} frames (${((renderedFrames / durationInFrames) * 100).toFixed(0)}%)`);
+      if (renderedFrames % 100 === 0 || renderedFrames === durationInFrames) {
+        const pct = ((renderedFrames / durationInFrames) * 100).toFixed(0);
+        process.stdout.write(`    ↳ ${renderedFrames}/${durationInFrames} frames (${pct}%)\r`);
+        if (renderedFrames === durationInFrames) process.stdout.write('\n');
       }
     },
   });
@@ -937,6 +943,83 @@ async function sendNotification(userId: string, title: string, message: string, 
     }
   } catch (e: any) {
     console.warn(`  ⚠ Failed to send push notification: ${e.message}`);
+  }
+}
+
+// ─── Proteus Cleanup Engine — Post-Render Storage Pruning ─────────────────────
+
+async function proteusPostRenderCleanup(userId: string, currentVideoPath: string, currentThumbPath: string): Promise<void> {
+  try {
+    console.log('  🧹 Proteus Cleanup Engine — pruning orphaned storage objects...');
+
+    const [videoList, thumbList] = await Promise.all([
+      supabase.storage.from('videos').list(`manual/${userId}`, { limit: 200 }),
+      supabase.storage.from('videos').list(`manual-thumbnails/${userId}`, { limit: 200 }),
+    ]);
+
+    const { data: validPosts } = await supabase
+      .from('posts')
+      .select('video_url, thumbnail_url')
+      .eq('user_id', userId)
+      .in('status', ['published', 'rendered'])
+      .not('video_url', 'is', null);
+
+    const validVideoNames = new Set<string>();
+    const validThumbNames = new Set<string>();
+    for (const p of (validPosts ?? [])) {
+      if (p.video_url) {
+        const name = p.video_url.split('/').pop();
+        if (name) validVideoNames.add(name);
+      }
+      if (p.thumbnail_url) {
+        const name = p.thumbnail_url.split('/').pop();
+        if (name) validThumbNames.add(name);
+      }
+    }
+
+    validVideoNames.add(currentVideoPath.split('/').pop() ?? '');
+    validThumbNames.add(currentThumbPath.split('/').pop() ?? '');
+
+    const staleVideos = (videoList.data ?? []).filter(f => {
+      if (validVideoNames.has(f.name)) return false;
+      const age = Date.now() - new Date(f.updated_at ?? f.created_at ?? 0).getTime();
+      return age > 60 * 60 * 1000;
+    });
+
+    const staleVideoKeys = staleVideos.map(f => `manual/${userId}/${f.name}`);
+    if (staleVideoKeys.length > 0) {
+      await supabase.storage.from('videos').remove(staleVideoKeys);
+      console.log(`     → Deleted ${staleVideoKeys.length} orphaned video object(s)`);
+    }
+
+    const staleThumbs = (thumbList.data ?? []).filter(f => {
+      if (validThumbNames.has(f.name)) return false;
+      const age = Date.now() - new Date(f.updated_at ?? f.created_at ?? 0).getTime();
+      return age > 60 * 60 * 1000;
+    });
+
+    const staleThumbKeys = staleThumbs.map(f => `manual-thumbnails/${userId}/${f.name}`);
+    if (staleThumbKeys.length > 0) {
+      await supabase.storage.from('videos').remove(staleThumbKeys);
+      console.log(`     → Deleted ${staleThumbKeys.length} orphaned thumbnail object(s)`);
+    }
+
+    if (staleVideoKeys.length === 0 && staleThumbKeys.length === 0) {
+      console.log('     → Storage is clean — no orphaned objects found');
+    }
+
+    try {
+      await supabase.from('cleanup_logs').insert({
+        triggered_by: 'post_render',
+        user_id: userId,
+        videos_deleted: staleVideoKeys.length,
+        thumbs_deleted: staleThumbKeys.length,
+        notes: `Post-render cleanup for manual pipeline`,
+      });
+    } catch { /* cleanup_logs table may not exist yet — non-critical */ }
+
+  } catch (e: any) {
+    console.warn(`  ⚠ Proteus cleanup warning: ${e.message?.slice(0, 120)}`);
   }
 }
 
@@ -1009,72 +1092,86 @@ async function runManualPipeline(job: any): Promise<void> {
     console.log(`     → "${title}" | ${scenes.length} scenes`);
     if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
 
-    // 3. Generate caption & hashtags
-    console.log('  3/8 Generating viral caption and hashtags...');
-    const { caption, hashtags } = await generateCaptionAndHashtags(topic, niche, title, script);
-    console.log(`     → Caption: "${caption.slice(0, 60)}..."`);
-    console.log(`     → Hashtags: ${hashtags.split(' ').length} tags`);
-    if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
+    // 3. Voiceover + caption/hashtags — run in parallel for speed
+    console.log('  3/8 Generating voiceover + timestamps + caption (parallel)...');
+    const [voiceoverResult, captionResult] = await Promise.all([
+      generateVoiceoverWithTimestamps(script),
+      generateCaptionAndHashtags(topic, niche, title, script),
+    ]);
 
-    // 4. Voiceover + real word timestamps via UnrealSpeech /synthesisTasks
-    console.log('  4/8 Generating voiceover + real timestamps (UnrealSpeech)...');
-    const { audioBuffer, wordTimestamps } = await generateVoiceoverWithTimestamps(script);
+    const { audioBuffer, wordTimestamps } = voiceoverResult;
+    const { caption, hashtags } = captionResult;
     const audioPath = join(tmpDir, 'voice.mp3');
     writeFileSync(audioPath, audioBuffer);
-    console.log(`     → ${(audioBuffer.byteLength / 1024).toFixed(0)} KB audio`);
+    console.log(`     → Audio: ${(audioBuffer.byteLength / 1024).toFixed(0)} KB`);
+    console.log(`     → Caption ready | Hashtags: ${hashtags.split(' ').length} tags`);
+    if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
 
-    // 5. Background music
-    console.log('  5/8 Downloading background music...');
-    const musicPath = await downloadBackgroundMusic(tmpDir);
-
-    // 6. Scene images — fully parallel for maximum speed
-    console.log(`  6/8 Generating ${scenes.length} scene images in parallel (Cloudflare AI → Pollinations → gradient fallback)...`);
-    // videoVariant ensures each video gets unique atmospheric details even if topic/scenes repeat
+    // 4. Background music + scene images — run FULLY in parallel
+    console.log(`  4/8 Generating ${scenes.length} scene images + downloading music (parallel)...`);
     const videoVariant = Math.floor((Date.now() / 1000) % 10000);
     const imageSlots: Array<string | null> = new Array(scenes.length).fill(null);
-    await Promise.all(scenes.map(async (scene, i) => {
-      try {
-        const imgBuf = await generateImage(scene, i, videoVariant);
-        const imgPath = join(tmpDir, `scene_${i}.jpg`);
-        writeFileSync(imgPath, imgBuf);
-        imageSlots[i] = imgPath;
-        console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-      } catch (e: any) {
-        console.warn(`     ⚠ Scene ${i + 1} unexpected error: ${e.message?.slice(0, 80)} — using inline gradient`);
-        const pp = join(tmpDir, `scene_${i}.jpg`);
+
+    await Promise.all([
+      downloadBackgroundMusic(tmpDir).then(path => {
+        (imageSlots as any)._musicPath = path;
+      }),
+      ...scenes.map(async (scene, i) => {
         try {
-          const gradients = ['gradient:#0d0d2b-#1a0030', 'gradient:#0a1628-#1a2855', 'gradient:#1a0000-#3d0010', 'gradient:#001a1a-#00333a', 'gradient:#1a1500-#3d3000'];
-          execSync(`convert -size 1080x1920 "${gradients[i % gradients.length]}" -quality 85 "${pp}" 2>/dev/null`);
-          if (existsSync(pp) && statSync(pp).size > 500) imageSlots[i] = pp;
-        } catch { /* skip this scene */ }
-      }
-    }));
-    const imagePaths = imageSlots.filter((p): p is string => p !== null);
+          const imgBuf = await generateImage(scene, i, videoVariant);
+          const imgPath = join(tmpDir, `scene_${i}.jpg`);
+          writeFileSync(imgPath, imgBuf);
+          imageSlots[i] = imgPath;
+          console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+        } catch (e: any) {
+          console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message?.slice(0, 80)} — using gradient`);
+          const pp = join(tmpDir, `scene_${i}.jpg`);
+          try {
+            const gradients = ['gradient:#0d0d2b-#1a0030', 'gradient:#0a1628-#1a2855', 'gradient:#1a0000-#3d0010', 'gradient:#001a1a-#00333a', 'gradient:#1a1500-#3d3000'];
+            execSync(`convert -size 1080x1920 "${gradients[i % gradients.length]}" -quality 75 "${pp}" 2>/dev/null`);
+            if (existsSync(pp) && statSync(pp).size > 500) imageSlots[i] = pp;
+          } catch { /* skip */ }
+        }
+      }),
+    ]);
+
+    const musicPath: string | null = (imageSlots as any)._musicPath ?? null;
+    const imagePaths = imageSlots.filter((p): p is string => p !== null && typeof p === 'string');
     if (imagePaths.length === 0) {
       throw new Error('All scene images failed to generate — cannot create video');
     }
-    console.log(`     → ${imagePaths.length} of ${scenes.length} scenes ready`);
+    console.log(`     → ${imagePaths.length}/${scenes.length} scenes ready | Music: ${musicPath ? '✓' : '✗ (voiceover only)'}`);
 
-    // 7. Remotion render
-    console.log('  7/8 Rendering video with Remotion...');
+    console.log(`  5/8 Caption: "${caption.slice(0, 60)}..."`);
+
+    // 6. Remotion render
+    console.log('  6/8 Rendering video with Remotion...');
     const videoPath = join(tmpDir, 'final.mp4');
     await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title, wordTimestamps);
     let _rawSize = readFileSync(videoPath).byteLength;
-    console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — compressing...`);
+    console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — optimizing...`);
+
     try {
       const _cPath = videoPath.replace('.mp4', '_opt.mp4');
-      execSync(`ffmpeg -i "${videoPath}" -c:v copy -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>&1`, { timeout: 300000 });
-      const _cSize = readFileSync(_cPath).byteLength;
-      console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
-      execSync(`mv "${_cPath}" "${videoPath}"`);
+      execSync(
+        `ffmpeg -i "${videoPath}" -c:v copy -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>&1`,
+        { timeout: 300000 }
+      );
+      if (existsSync(_cPath) && statSync(_cPath).size > 100000) {
+        const _cSize = statSync(_cPath).size;
+        console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
+        execSync(`mv "${_cPath}" "${videoPath}"`);
+      }
     } catch (_ce: any) { console.warn(`     ⚠ Compression skipped: ${_ce.message?.slice(0,60)}`); }
 
-    // 8. Upload to Supabase Storage
-    console.log('  8/8 Uploading to Supabase Storage...');
+    // 7. Upload to Supabase Storage
+    console.log('  7/8 Uploading to Supabase Storage...');
     const timestamp = Date.now();
     const userId = job.user_id;
-    const videoUrl = await uploadFile(videoPath, `manual/${userId}/${timestamp}.mp4`, 'video/mp4');
-    const thumbUrl = await uploadFile(imagePaths[0], `manual-thumbnails/${userId}/${timestamp}.jpg`, 'image/jpeg');
+    const storagePath = `manual/${userId}/${timestamp}.mp4`;
+    const thumbStoragePath = `manual-thumbnails/${userId}/${timestamp}.jpg`;
+    const videoUrl = await uploadFile(videoPath, storagePath, 'video/mp4');
+    const thumbUrl = await uploadFile(imagePaths[0], thumbStoragePath, 'image/jpeg');
     console.log(`     → ${videoUrl}`);
 
     const elapsed = Date.now() - startTime;
@@ -1105,6 +1202,10 @@ async function runManualPipeline(job: any): Promise<void> {
       'success',
       postId ?? undefined,
     );
+
+    // 8. Run Proteus Cleanup Engine after successful render
+    console.log('  8/8 Running post-render cleanup...');
+    await proteusPostRenderCleanup(userId, storagePath, thumbStoragePath);
 
   } catch (err: any) {
     await failJob(err.message ?? String(err));
@@ -1147,8 +1248,6 @@ async function main(): Promise<void> {
   let jobs: any[] | null = null;
   let fetchError: any = null;
 
-  // Stale running threshold: jobs stuck in 'running' for over 45 minutes are re-attempted
-  // (happens when GitHub Actions runner times out mid-run)
   const staleThreshold = new Date(Date.now() - 45 * 60 * 1000).toISOString();
 
   if (jobIdArg) {
@@ -1194,6 +1293,7 @@ async function main(): Promise<void> {
 
   console.log('\n✅ All manual pipelines complete!');
 }
+
 main().catch(err => {
   console.error('Fatal:', err);
   process.exit(1);

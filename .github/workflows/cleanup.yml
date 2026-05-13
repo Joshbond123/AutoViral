@@ -1,0 +1,50 @@
+name: Proteus Cleanup Engine
+
+on:
+  # Run daily at 3:00 AM UTC — off-peak hours for minimal disruption
+  schedule:
+    - cron: '0 3 * * *'
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode — log what would be deleted without actually deleting'
+        required: false
+        default: 'false'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install tsx globally
+        run: npm install -g tsx
+
+      - name: Run Proteus Cleanup Engine
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROTEUS_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: npx tsx scripts/cleanup.ts
+
+      - name: Upload cleanup summary as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proteus-cleanup-log-${{ github.run_id }}
+          path: /tmp/proteus-cleanup-*.log
+          if-no-files-found: ignore
+          retention-days: 7

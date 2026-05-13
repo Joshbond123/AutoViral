@@ -29,22 +29,20 @@ const NICHES = [
 ];
 
 const BACKGROUND_MUSIC_TRACKS = [
-  // Dark / thriller — high impact
-  'https://assets.mixkit.co/music/preview/mixkit-dramatic-mystery-trailer-599.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-dark-suspense-tension-583.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-cinematic-tension-pulsing-521.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-news-big-moment-574.mp3',
-  // Epic / cinematic
-  'https://assets.mixkit.co/music/preview/mixkit-epic-orchestra-736.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-inspiring-cinematic-documentary-120.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-adventure-awaits-471.mp3',
-  // Urban / modern
-  'https://assets.mixkit.co/music/preview/mixkit-deep-urban-623.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-hip-hop-02-738.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3',
-  // Emotional / documentary
-  'https://assets.mixkit.co/music/preview/mixkit-piano-reflections-22.mp3',
-  'https://assets.mixkit.co/music/preview/mixkit-life-is-a-dream-837.mp3',
+  // Verified Mixkit tracks (free license, reliable CDN)
+  'https://assets.mixkit.co/music/download/mixkit-dramatic-mystery-trailer-599.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-dark-suspense-tension-583.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-cinematic-tension-pulsing-521.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-news-big-moment-574.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-epic-orchestra-736.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-inspiring-cinematic-documentary-120.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-deep-urban-623.mp3',
+  'https://assets.mixkit.co/music/download/mixkit-hip-hop-02-738.mp3',
+  // Pixabay free music (CC0)
+  'https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3',
+  'https://cdn.pixabay.com/download/audio/2022/03/10/audio_270f49b862.mp3',
+  'https://cdn.pixabay.com/download/audio/2021/11/04/audio_cb81e0fdbd.mp3',
+  'https://cdn.pixabay.com/download/audio/2022/02/23/audio_ea70a1b8b6.mp3',
 ];
 
 // ─── Key Rotation System ───────────────────────────────────────────────────────
@@ -303,15 +301,16 @@ CAPTION RULES:
 
 HASHTAG RULES:
 - Exactly 5 hashtags — no more, no less
-- Use broad, high-volume crypto community hashtags that maximize reach
-- Always include #crypto and #blockchain
-- The remaining 3 should be popular crypto terms such as #bitcoin #ethereum #web3 #defi #altcoin #nft #cryptonews #cryptotrading #btc or similar high-traffic tags
-- Format: space-separated on one line
+- Focus EXCLUSIVELY on crypto scam awareness and fraud prevention
+- Always include #cryptoscam and #crypto
+- The remaining 3 must come from: #cryptofraud #scamalert #cryptoawareness #blockchainscam #cryptosafety #web3security #cryptowarning #investmentscam #cryptoscams #scamwatch #cryptofraudAlert #blockchainfraud #cryptoprotection
+- Choose the 3 most relevant to this specific scam type
+- Format: space-separated on one line, no duplicates
 
 Return ONLY valid JSON, no markdown, no explanation:
 {
   "caption": "your caption here",
-  "hashtags": "#crypto #blockchain #bitcoin #ethereum #cryptonews"
+  "hashtags": "#cryptoscam #crypto #scamalert #cryptoawareness #cryptofraud"
 }`;
 
   try {
@@ -503,12 +502,30 @@ const SCENE_CINEMATIC_STYLES = [
   'overhead bird-eye or stark frontal view, bold red-orange warning color palette, geometric and symbolic composition, graphic impact',
 ];
 
-function buildImagePrompt(sceneDesc: string, index: number = 0): string {
+// Unique atmospheric variations injected per video to ensure no two videos look the same
+const ATMOSPHERIC_VARIATIONS = [
+  'volumetric light rays piercing through dense atmosphere',
+  'dust particles visible drifting through frame in foreground',
+  'steam or vapor curling through the scene background',
+  'reflections visible in rain-slicked surface below',
+  'subtle lens flare streak from extreme edge of frame',
+  'fog bank rolling in from background distance',
+  'overexposed highlights creating stark dramatic silhouette',
+  'atmospheric haze softening deep background elements',
+  'backlit rim-lighting creating sharp edge glow around subjects',
+  'smoke trails drifting upward through beams of light',
+  'condensation or breath visible in cold environment',
+  'shallow water surface reflections in extreme foreground',
+];
+
+function buildImagePrompt(sceneDesc: string, index: number = 0, videoVariant: number = 0): string {
   const cleanDesc = sceneDesc.replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '').replace(/\[.*?\]/g, '').trim();
   const styleModifier = SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length];
+  const atmosphericDetail = ATMOSPHERIC_VARIATIONS[(index + videoVariant) % ATMOSPHERIC_VARIATIONS.length];
   return [
     cleanDesc,
     styleModifier + '.',
+    `Atmospheric detail: ${atmosphericDetail}.`,
     'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, professional cinematic photography, photorealistic, ultra high quality.',
     'STRICT: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels, NO signs, NO titles anywhere in the image — pure visual only.',
     'Do NOT split into panels or multiple images. Single full-frame portrait scene only.',
@@ -516,8 +533,8 @@ function buildImagePrompt(sceneDesc: string, index: number = 0): string {
   ].join(' ');
 }
 
-async function generateImageWithCloudflare(sceneDesc: string, index: number): Promise<Buffer> {
-  const prompt = buildImagePrompt(sceneDesc, index);
+async function generateImageWithCloudflare(sceneDesc: string, index: number, videoVariant: number = 0): Promise<Buffer> {
+  const prompt = buildImagePrompt(sceneDesc, index, videoVariant);
 
   return tryWithKeys('cloudflare', async (cfToken) => {
     const { data: idKeys } = await supabase
@@ -535,7 +552,7 @@ async function generateImageWithCloudflare(sceneDesc: string, index: number): Pr
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, num_steps: 16 }),
+        body: JSON.stringify({ prompt, num_steps: 28 }),
       }
     );
     if (!resp.ok) throw new Error(`Cloudflare image (scene ${index + 1}) ${resp.status}: ${await resp.text()}`);
@@ -552,12 +569,13 @@ async function generateImageWithCloudflare(sceneDesc: string, index: number): Pr
   });
 }
 
-async function generateImageWithPollinations(sceneDesc: string, index: number, simplify = false): Promise<Buffer> {
+async function generateImageWithPollinations(sceneDesc: string, index: number, simplify = false, videoVariant: number = 0): Promise<Buffer> {
   const baseDesc = simplify ? sceneDesc.slice(0, 200) : sceneDesc;
   const prompt = simplify
     ? `${baseDesc} ${SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length]} portrait 9:16 photorealistic no text no words`
-    : buildImagePrompt(baseDesc, index);
-  const seed = Math.floor(Math.random() * 999999);
+    : buildImagePrompt(baseDesc, index, videoVariant);
+  // Incorporate videoVariant into seed so the same scene desc produces different images across videos
+  const seed = (Math.floor(Math.random() * 899999) + 100000) ^ (videoVariant * 7919);
   const encodedPrompt = encodeURIComponent(prompt.slice(0, 1500));
   const urlBase = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${seed}`;
 
@@ -638,7 +656,7 @@ async function generateFallbackImage(index: number): Promise<Buffer> {
   );
 }
 
-async function generateImage(sceneDesc: string, index: number): Promise<Buffer> {
+async function generateImage(sceneDesc: string, index: number, videoVariant: number = 0): Promise<Buffer> {
   const MAX_ATTEMPTS = 3;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -646,14 +664,14 @@ async function generateImage(sceneDesc: string, index: number): Promise<Buffer> 
 
     // Step 1: Cloudflare AI with key rotation
     try {
-      return await generateImageWithCloudflare(sceneDesc, index);
+      return await generateImageWithCloudflare(sceneDesc, index, videoVariant);
     } catch (cfErr: any) {
       console.warn(`     ⚠ Cloudflare failed scene ${index + 1} (attempt ${attempt}): ${cfErr.message.slice(0, 80)}`);
     }
 
     // Step 2: Pollinations with key rotation + retry logic
     try {
-      return await generateImageWithPollinations(sceneDesc, index, simplify);
+      return await generateImageWithPollinations(sceneDesc, index, simplify, videoVariant);
     } catch (polErr: any) {
       console.warn(`     ⚠ Pollinations failed scene ${index + 1} (attempt ${attempt}): ${polErr.message.slice(0, 80)}`);
       if (attempt < MAX_ATTEMPTS) {
@@ -686,27 +704,36 @@ async function cropToPortrait(imgBuf: Buffer): Promise<Buffer> {
 // ─── Background Music ──────────────────────────────────────────────────────────
 
 async function downloadBackgroundMusic(tmpDir: string): Promise<string | null> {
-  const trackUrl = BACKGROUND_MUSIC_TRACKS[Math.floor(Math.random() * BACKGROUND_MUSIC_TRACKS.length)];
   const musicPath = join(tmpDir, 'music.mp3');
-  try {
-    console.log(`     → Downloading background music...`);
-    const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(15000) });
-    if (!resp.ok) {
-      console.warn(`     ⚠ Music download failed (${resp.status}) — running without background music`);
-      return null;
+  // Shuffle all tracks so we try them in a random order, falling back through each
+  const shuffled = [...BACKGROUND_MUSIC_TRACKS].sort(() => Math.random() - 0.5);
+  for (const trackUrl of shuffled) {
+    try {
+      console.log(`     → Downloading music: ${trackUrl.split('/').pop()}...`);
+      const resp = await fetch(trackUrl, { signal: AbortSignal.timeout(35000) });
+      if (!resp.ok) {
+        console.warn(`     ⚠ Music track HTTP ${resp.status} — trying next`);
+        continue;
+      }
+      const ct = resp.headers.get('content-type') ?? '';
+      if (ct && !ct.includes('audio') && !ct.includes('octet-stream') && !ct.includes('mpeg')) {
+        console.warn(`     ⚠ Music unexpected content-type "${ct}" — trying next`);
+        continue;
+      }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (buf.byteLength < 10000) {
+        console.warn(`     ⚠ Music file too small (${buf.byteLength}B) — trying next`);
+        continue;
+      }
+      writeFileSync(musicPath, buf);
+      console.log(`     → Music: ${(buf.byteLength / 1024).toFixed(0)} KB ✓`);
+      return musicPath;
+    } catch (e: any) {
+      console.warn(`     ⚠ Music error: ${e.message?.slice(0, 60)} — trying next`);
     }
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.byteLength < 10000) {
-      console.warn(`     ⚠ Music file too small — skipping`);
-      return null;
-    }
-    writeFileSync(musicPath, buf);
-    console.log(`     → Music: ${(buf.byteLength / 1024).toFixed(0)} KB`);
-    return musicPath;
-  } catch (e: any) {
-    console.warn(`     ⚠ Music download error: ${e.message} — running without background music`);
-    return null;
   }
+  console.warn('     ⚠ All music tracks failed — video will have voiceover only');
+  return null;
 }
 
 // ─── Remotion Video Assembly ───────────────────────────────────────────────────
@@ -1006,10 +1033,12 @@ async function runPipeline(schedule: any): Promise<void> {
 
     // 6. Scene images — fully parallel for maximum speed
     console.log(`  6/8 Generating ${scenes.length} scene images in parallel (Cloudflare AI → Pollinations → gradient fallback)...`);
+    // videoVariant ensures each video gets unique atmospheric details even if topic/scenes repeat
+    const videoVariant = Math.floor((Date.now() / 1000) % 10000);
     const imageSlots: Array<string | null> = new Array(scenes.length).fill(null);
     await Promise.all(scenes.map(async (scene, i) => {
       try {
-        const imgBuf = await generateImage(scene, i);
+        const imgBuf = await generateImage(scene, i, videoVariant);
         const imgPath = join(tmpDir, `scene_${i}.jpg`);
         writeFileSync(imgPath, imgBuf);
         imageSlots[i] = imgPath;
@@ -1141,18 +1170,32 @@ async function main(): Promise<void> {
     console.warn('⚠ No Cloudflare AI keys — image generation will use Pollinations AI (free fallback)');
   }
 
-  const { data: schedules, error } = await supabase
-    .from('schedules')
-    .select('*')
-    .eq('status', 'pending')
-    .lte('scheduled_time', new Date().toISOString());
+  const now = new Date().toISOString();
+  // Stale running threshold: jobs stuck in 'running' for over 45 minutes are re-attempted
+  // (happens when GitHub Actions runner times out mid-run)
+  const staleThreshold = new Date(Date.now() - 45 * 60 * 1000).toISOString();
 
-  if (error) {
-    console.error('Failed to fetch schedules:', error.message);
+  const [pendingRes, staleRes] = await Promise.all([
+    supabase.from('schedules').select('*').eq('status', 'pending').lte('scheduled_time', now),
+    supabase.from('schedules').select('*').eq('status', 'running').lte('last_run_at', staleThreshold),
+  ]);
+
+  if (pendingRes.error) {
+    console.error('Failed to fetch pending schedules:', pendingRes.error.message);
     process.exit(1);
   }
 
-  if (!schedules || schedules.length === 0) {
+  const staleSchedules = (staleRes.data ?? []).map((s: any) => ({ ...s, _stale: true }));
+  if (staleSchedules.length > 0) {
+    console.log(`Found ${staleSchedules.length} stale running schedule(s) — resetting and re-running`);
+    for (const s of staleSchedules) {
+      await supabase.from('schedules').update({ status: 'pending' }).eq('id', s.id);
+    }
+  }
+
+  const schedules = [...(pendingRes.data ?? []), ...staleSchedules];
+
+  if (schedules.length === 0) {
     console.log('✓ No pending schedules due right now.');
     return;
   }

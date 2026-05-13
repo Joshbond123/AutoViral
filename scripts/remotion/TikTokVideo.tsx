@@ -138,7 +138,7 @@ const OutroCard: React.FC<{ frame: number; fps: number; outroStart: number }> = 
             margin: 0,
             textShadow: '0 2px 20px rgba(0,0,0,1)',
           }}>
-            WE MAY BE ABLE TO HELP{'\n'}YOU RECOVER YOUR FUNDS
+            RECOVER YOUR LOST CRYPTO{'\n'}FROM SCAMMERS
           </p>
         </div>
 
@@ -206,7 +206,7 @@ export const TikTokVideo: React.FC<TikTokVideoProps> = ({
   const { fps } = useVideoConfig();
 
   // ── Timing ─────────────────────────────────────────────────────────────────
-  const OUTRO_FRAMES = Math.round(8.0 * fps);
+  const OUTRO_FRAMES = Math.round(5.0 * fps);
   const audioDurationFrames = audioDurationFramesProp
     ?? Math.max(durationInFrames - OUTRO_FRAMES, Math.round(durationInFrames * 0.85));
 

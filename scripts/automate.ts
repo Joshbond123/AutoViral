@@ -29,20 +29,24 @@ const NICHES = [
 ];
 
 const BACKGROUND_MUSIC_TRACKS = [
-  // Verified Mixkit tracks (free license, reliable CDN)
-  'https://assets.mixkit.co/music/download/mixkit-dramatic-mystery-trailer-599.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-dark-suspense-tension-583.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-cinematic-tension-pulsing-521.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-news-big-moment-574.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-epic-orchestra-736.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-inspiring-cinematic-documentary-120.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-deep-urban-623.mp3',
-  'https://assets.mixkit.co/music/download/mixkit-hip-hop-02-738.mp3',
-  // Pixabay free music (CC0)
-  'https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3',
-  'https://cdn.pixabay.com/download/audio/2022/03/10/audio_270f49b862.mp3',
-  'https://cdn.pixabay.com/download/audio/2021/11/04/audio_cb81e0fdbd.mp3',
-  'https://cdn.pixabay.com/download/audio/2022/02/23/audio_ea70a1b8b6.mp3',
+  // SoundHelix — public domain, no auth required, reliable CDN
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3',
 ];
 
 // ─── Key Rotation System ───────────────────────────────────────────────────────
@@ -115,7 +119,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
 
 const CEREBRAS_MODELS = [
   'qwen-3-235b-a22b-instruct-2507',
-  'llama-4-scout-17b-16e-instruct',
+  'qwen-3-32b',
   'llama3.3-70b',
 ];
 
@@ -1076,7 +1080,7 @@ async function runPipeline(schedule: any): Promise<void> {
     console.log(`     → Raw: ${(_rawSize / 1024 / 1024).toFixed(1)} MB — compressing...`);
     try {
       const _cPath = videoPath.replace('.mp4', '_opt.mp4');
-      execSync(`ffmpeg -i "${videoPath}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>/dev/null`, { timeout: 300000 });
+      execSync(`ffmpeg -i "${videoPath}" -c:v copy -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>&1`, { timeout: 300000 });
       const _cSize = readFileSync(_cPath).byteLength;
       console.log(`     → Optimized: ${(_cSize/1024/1024).toFixed(1)} MB (${Math.round((1-_cSize/_rawSize)*100)}% smaller)`);
       execSync(`mv "${_cPath}" "${videoPath}"`);

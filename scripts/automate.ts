@@ -1135,7 +1135,7 @@ async function runPipeline(schedule: any): Promise<void> {
     }
 
     await supabase.from('schedules').update({
-      status: 'success',
+      status: 'pending',
       last_run_at: new Date().toISOString(),
       last_run_status: 'success',
       last_topic: topic,

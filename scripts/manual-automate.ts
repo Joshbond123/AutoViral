@@ -209,7 +209,7 @@ VOICEOVER RULES (the "script" field):
 - CRITICAL: NEVER use first-person narration — BANNED words: "I", "I've", "I was", "I lost", "I joined", "me", "my", "we joined", "our wallet"
 - The narrator is a journalist REPORTING on scams, NOT a victim telling their story
 - Be factual, specific, dramatic — name the scam type, explain how it works, warn the viewer
-- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings."
+- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings."
 - FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
@@ -275,7 +275,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
             !l.includes('{') && !/{\s*"/.test(l) && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l)
           );
           _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
-            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings.`;
+            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
         }
         return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
       }
@@ -385,7 +385,7 @@ function cleanVoiceoverScript(raw: string): string {
   if (speech.length > 0) {
     return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
   }
-  return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. We may be able to help you recover your funds. Follow for daily crypto scam warnings.';
+  return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.';
 }
 
 // ─── Voiceover + Real Timestamps (UnrealSpeech /synthesisTasks) ──────────────
@@ -762,7 +762,7 @@ async function assembleVideoWithRemotion(
   const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer') as any;
 
   const FPS = 30;
-  const OUTRO_SEC = 8.0;
+  const OUTRO_SEC = 5.0;
   const OUTRO_MIN_FRAMES = Math.ceil(OUTRO_SEC * FPS);
   const AUDIO_BUFFER_SEC = 1.0;
 
@@ -1154,7 +1154,7 @@ async function runManualPipeline(job: any): Promise<void> {
     try {
       const _cPath = videoPath.replace('.mp4', '_opt.mp4');
       execSync(
-        `ffmpeg -i "${videoPath}" -c:v copy -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>&1`,
+        `ffmpeg -i "${videoPath}" -c:v libx264 -crf 23 -preset fast -profile:v high -c:a aac -b:a 128k -movflags +faststart -y "${_cPath}" 2>&1`,
         { timeout: 300000 }
       );
       if (existsSync(_cPath) && statSync(_cPath).size > 100000) {

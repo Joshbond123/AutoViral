@@ -90,7 +90,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
       } catch (e: any) {
         const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic|neurons|daily.*alloc/i.test(e.message ?? '');
         if (isRateLimit && attempt < maxAttempts) {
-          const delay = attempt * 4000;
+          const delay = attempt === 1 ? 15000 : 60000;
           console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
           await new Promise(res => setTimeout(res, delay));
           continue;
@@ -109,6 +109,47 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
   }
 
   throw lastError ?? new Error(`All keys for ${service} exhausted`);
+}
+
+// ─── Cerebras Multi-Model Chat (rate-limit resilient) ─────────────────────────
+
+const CEREBRAS_MODELS = [
+  'qwen-3-235b-a22b-instruct-2507',
+  'llama-4-scout-17b-16e-instruct',
+  'llama3.3-70b',
+];
+
+async function cerebrasChat(
+  key: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+): Promise<string> {
+  let lastErr: Error | null = null;
+  for (const model of CEREBRAS_MODELS) {
+    try {
+      const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        const err = new Error(`Cerebras (${model}) ${resp.status}: ${errText}`);
+        if (resp.status === 429) { lastErr = err; await new Promise(r => setTimeout(r, 2000)); continue; }
+        throw err;
+      }
+      const json = await resp.json() as any;
+      return (json.choices?.[0]?.message?.content ?? '').trim();
+    } catch (e: any) {
+      if (/429|rate.?limit|too.?many|quota|exceeded/.test(e.message ?? '')) {
+        lastErr = e;
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr ?? new Error('All Cerebras models exhausted');
 }
 
 // ─── TopicShield ──────────────────────────────────────────────────────────────
@@ -142,18 +183,8 @@ AVOID these already-used topics: ${used.slice(0, 40).join(' | ')}
 Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 
   return tryWithKeys('cerebras', async (key) => {
-    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen-3-235b-a22b-instruct-2507',
-        max_tokens: 80,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!resp.ok) throw new Error(`Cerebras topic ${resp.status}: ${await resp.text()}`);
-    const json = await resp.json() as any;
-    const topic = (json.choices?.[0]?.message?.content ?? '').trim().replace(/^["']|["']$/g, '');
+    const rawTopic = await cerebrasChat(key, [{ role: 'user', content: prompt }], 80);
+    const topic = rawTopic.replace(/^["']|["']$/g, '');
     return topic || `${niche} Warning — ${new Date().toLocaleDateString()}`;
   });
 }
@@ -213,18 +244,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 }`;
 
   return tryWithKeys('cerebras', async (key) => {
-    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen-3-235b-a22b-instruct-2507',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!resp.ok) throw new Error(`Cerebras script ${resp.status}: ${await resp.text()}`);
-    const json = await resp.json() as any;
-    const content = (json.choices?.[0]?.message?.content ?? '').trim();
+    const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 2000);
 
     try {
       const match = content.match(/\{[\s\S]*\}/);
@@ -315,24 +335,13 @@ Return ONLY valid JSON, no markdown, no explanation:
 
   try {
     return await tryWithKeys('cerebras', async (key) => {
-      const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'qwen-3-235b-a22b-instruct-2507',
-          max_tokens: 400,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      });
-      if (!resp.ok) throw new Error(`Cerebras caption ${resp.status}: ${await resp.text()}`);
-      const json = await resp.json() as any;
-      const content = (json.choices?.[0]?.message?.content ?? '').trim();
+      const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 400);
       const match = content.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
         return {
           caption: (parsed.caption || `${title} - This crypto scam could steal everything from you. Share to protect others. Follow for daily crypto scam warnings.`).slice(0, 150),
-          hashtags: parsed.hashtags || '#crypto #blockchain #bitcoin #ethereum #cryptonews',
+          hashtags: parsed.hashtags || '#cryptoscam #crypto #scamalert #cryptofraud #cryptoawareness',
         };
       }
       throw new Error('No JSON in response');
@@ -341,7 +350,7 @@ Return ONLY valid JSON, no markdown, no explanation:
     console.warn(`  ⚠ Caption generation failed: ${e.message} — using defaults`);
     return {
       caption: `${title.slice(0, 100)} - This crypto scam has already stolen millions. Share to warn others. Follow for daily crypto scam warnings.`,
-      hashtags: '#crypto #blockchain #bitcoin #ethereum #cryptonews',
+      hashtags: '#cryptoscam #crypto #scamalert #cryptofraud #cryptoawareness',
     };
   }
 }
@@ -420,7 +429,7 @@ async function generateVoiceoverWithTimestamps(script: string): Promise<Voiceove
     let timestampsUri: string = task.TimestampsUri ?? '';
     let taskStatus: string = task.TaskStatus ?? 'scheduled';
 
-    const MAX_POLLS = 30;
+    const MAX_POLLS = 60;
     for (let i = 0; i < MAX_POLLS && taskStatus !== 'completed'; i++) {
       await new Promise(res => setTimeout(res, 3000));
       const pollResp = await fetch(`https://api.v6.unrealspeech.com/synthesisTasks/${taskId}`, {
@@ -883,8 +892,8 @@ async function assembleVideoWithRemotion(
     outputLocation: outputPath,
     inputProps,
     timeoutInMilliseconds: 18 * 60 * 1000,
-    concurrency: '100%',
-    chromiumOptions: { disableWebSecurity: true },
+    concurrency: 1,
+    chromiumOptions: { disableWebSecurity: true, gl: 'swiftshader' },
     onProgress: ({ renderedFrames }: any) => {
       if (renderedFrames % 150 === 0 || renderedFrames === durationInFrames) {
         const pct = ((renderedFrames / durationInFrames) * 100).toFixed(0);
@@ -982,12 +991,12 @@ async function runPipeline(schedule: any): Promise<void> {
       await supabase.from('posts').update({ status: 'failed', publish_result: msg }).eq('id', postId);
     }
     await supabase.from('schedules').update({
-      status: 'failed',
+      status: 'pending',
       last_run_status: 'failed',
       last_error: msg.slice(0, 500),
       execution_time_ms: elapsed,
       error_message: msg.slice(0, 500),
-      scheduled_time: new Date(Date.now() + 86400000).toISOString(),
+      scheduled_time: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     }).eq('id', schedule.id);
   };
 

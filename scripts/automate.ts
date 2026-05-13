@@ -117,9 +117,9 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
 // ─── Cerebras Multi-Model Chat (rate-limit resilient) ─────────────────────────
 
 const CEREBRAS_MODELS = [
-  'qwen-3-235b-a22b-instruct-2507',
-  'qwen-3-32b',
   'llama3.3-70b',
+  'llama3.1-70b',
+  'llama3.1-8b',
 ];
 
 async function cerebrasChat(
@@ -138,18 +138,18 @@ async function cerebrasChat(
       if (!resp.ok) {
         const errText = await resp.text();
         const err = new Error(`Cerebras (${model}) ${resp.status}: ${errText}`);
-        if (resp.status === 429) { lastErr = err; await new Promise(r => setTimeout(r, 2000)); continue; }
-        throw err;
+        lastErr = err;
+        if (resp.status === 429) await new Promise(r => setTimeout(r, 2000));
+        continue;
       }
       const json = await resp.json() as any;
       return (json.choices?.[0]?.message?.content ?? '').trim();
     } catch (e: any) {
+      lastErr = e as Error;
       if (/429|rate.?limit|too.?many|quota|exceeded/.test(e.message ?? '')) {
-        lastErr = e;
         await new Promise(r => setTimeout(r, 2000));
-        continue;
       }
-      throw e;
+      continue;
     }
   }
   throw lastErr ?? new Error('All Cerebras models exhausted');

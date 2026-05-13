@@ -272,9 +272,13 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
         ) {
           _scriptText = parsed.script.trim();
         } else {
+          // Visual/cinematic language guard — prevents scene/image descriptions from leaking into voiceover script
+          const VISUAL_LANG_KW = /\b(close.?up|wide.?angle|overhead|low.?angle|silhouett|backlit|rim.?light|depth.?of.?field|bokeh|macro.?shot|tracking|dolly|aerial|bird.?eye|color.?grade|amber.?backlight|server.?room|glowing|blinking|cinematic|photorealistic|portrait.?orientation|9:16|aspect.?ratio|dramatic.?atmosphere|neon.?lighting|dark.?background|full.?frame|establishing.?shot|lens.?flare|warm.?amber|crimson.?light|marble|leather.?wallet|golden.?coin|medium.?shot|extreme.?close|ultra.?wide|volumetric|atmospheric.?haze|shallow.?depth|backlight|sidelight|specular|ambient|glowing.?terminal|blinking.?lights|hooded.?figure|silhouetted|sweat.?on|trembling|hunched)\b/i;
           const _candidates = content.split(/\n+/).map((l: string) => l.trim()).filter((l: string) =>
-            l.length > 60 && !l.startsWith('"') && !l.includes('://') &&
-            !l.includes('{') && !/{\s*"/.test(l) && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l)
+            l.length > 60 && l.length < 600 && !l.startsWith('"') && !l.includes('://') &&
+            !l.includes('{') && !/{\s*"/.test(l) && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l) &&
+            !VISUAL_LANG_KW.test(l) &&
+            /\b(crypto|scam|fraud|victim|warning|alert|millions|thousands|stolen|protect|follow|TikTok|send|invest|wallet|you|your|this|these|how|what|why|when|people|today|now|already|never|always|beware)\b/i.test(l)
           );
           _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
             || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
@@ -285,7 +289,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 
     return {
       title: topic.slice(0, 150),
-      script: content,
+      script: `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
       scenes: [
         `${topic} crypto scam warning — shadowy figure at computer, dark dramatic atmosphere, cinematic 9:16`,
         `${topic} — victim looking at empty crypto wallet on screen, shocked expression, dark room`,
@@ -361,7 +365,8 @@ Return ONLY valid JSON, no markdown, no explanation:
 // ─── Script Cleaner ───────────────────────────────────────────────────────────
 
 function cleanVoiceoverScript(raw: string): string {
-  const IMAGE_KW = /\b(cinematic|portrait|photorealistic|9:16|aspect ratio|vertical orientation|dramatic atmosphere|neon lighting|hyperrealistic|full-frame|dark background|cinematography)\b/i;
+  // Comprehensive visual/cinematic language detector — prevents scene descriptions leaking into voiceover
+  const IMAGE_KW = /\b(cinematic|portrait|photorealistic|9:16|aspect.?ratio|vertical.?orientation|dramatic.?atmosphere|neon.?lighting|hyperrealistic|full.?frame|dark.?background|cinematography|depth.?of.?field|shallow.?depth|shallow.?focus|bokeh|close.?up|wide.?angle|overhead.?shot|low.?angle|silhouett|backlit|rim.?light|color.?grade|warm.?amber|cold.?blue|teal|crimson.?light|server.?room|blinking.?lights|glowing.?terminal|aerial.?shot|macro.?shot|ultra.?wide|bird.?eye|tracking.?shot|dolly.?shot|establishing.?shot|lens.?flare|vignette|rack.?focus|focal.?length|parallax|ambient.?light|specular|diffuse|hdri|vfx|cgi|render|shader|texture|3d.?model|ray.?trac|unreal.?engine|blender|hue.?saturation|exposure|aperture|bokeh|tilt.?shift|pan.?shot|crane.?shot|b.?roll|color.?pallett|grading|black.?marble|leather.?wallet|golden.?coin|atmospheric.?haze|volumetric.?light|dust.?particle|steam.?curl|condensation|puddle.?reflect|lens.?distort|anamorphic|fisheye|portrait.?orientation|extreme.?close|medium.?shot|long.?shot|establishing|reaction.?shot|cut.?away|backlight|sidelight|keylight|fill.?light|catch.?light|practical.?light|motivated.?light|sweat.?on|trembling.?finger|hunched.?at|silhouetted.?figure|hooded.?figure|glowing.?red|glowing.?blue|glowing.?screen|monitor.?glow|blinking.?cursor|dark.?server|dark.?room.?lit|soft.?desaturated|muted.?gray|desaturated.?tone|rim.?lighting|harsh.?shadow|upward.?shadow|wipe.?tear|head.?in.?hand|crumpled.?paper|empty.?wallet|single.?coin|stark.?frontal|geometric.?and.?symbolic|ultra-wide.?shot|ultra.?wide.?shot|extreme.?close-up|extreme.?closeup|low-angle.?shot|overhead.?aerial|bird.?s.?eye)\b/i;
 
   let text = raw
     .replace(/```[\s\S]*?```/gm, '')
@@ -376,11 +381,14 @@ function cleanVoiceoverScript(raw: string): string {
     .trim();
 
   const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(p => p.length > 40);
+  // Secondary narration check — text must contain spoken-word markers to pass
+  const NARRATION_KW = /\b(crypto|scam|fraud|victim|warning|alert|danger|millions|thousands|stolen|protect|follow|TikTok|direct|message|send|invest|wallet|transfer|account|platform|promise|trust|verify|news|watch|beware|never|always|you|your|this|these|how|what|why|when|people|person|someone|today|right.?now|already|because|before|after|reported|discovered|exposed|revealed|targeted|billions|hundreds|lost|recovery|funds|scammer|hacker|criminal|fraudster|scheme|operation|network)\b/i;
   const speech = paragraphs.filter(p =>
     p.split(/\s+/).length >= 12 &&
     !/^[A-Z][a-zA-Z ]+:/.test(p) &&
     !IMAGE_KW.test(p) &&
-    !/[{}"\[\]]/.test(p)
+    !/[{}"\[\]]/.test(p) &&
+    NARRATION_KW.test(p)
   );
 
   if (speech.length > 0) {

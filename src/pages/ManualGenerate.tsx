@@ -432,15 +432,32 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
               </button>
             )}
             {post.video_url && isReady && (
-              <a
-                href={post.video_url}
-                download
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all text-xs font-medium"
+              <button
+                onClick={async (e) => {
+                  const btn = e.currentTarget;
+                  btn.disabled = true;
+                  try {
+                    const r = await fetch(post.video_url!);
+                    if (!r.ok) throw new Error('fetch failed');
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${(post.title || 'video').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp4`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    window.open(post.video_url, '_blank');
+                  } finally {
+                    btn.disabled = false;
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all text-xs font-medium disabled:opacity-50"
               >
                 <Download size={12} /> <span className="hidden sm:inline">Download</span>
-              </a>
+              </button>
             )}
             {post.caption && (
               <button

@@ -627,22 +627,25 @@ async function generateImageWithPollinations(sceneDesc: string, index: number, s
   const hasKeys = (polKeyRows ?? []).length > 0;
 
   if (hasKeys) {
-    return tryWithKeys('pollinations', async (key) => {
-      console.log(`     → Pollinations AI (key-auth): scene ${index + 1}...`);
-      const resp = await fetch(urlBase, {
-        headers: { Authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(120000),
+    try {
+      return await tryWithKeys('pollinations', async (key) => {
+        console.log(`     → Pollinations AI (key-auth): scene ${index + 1}...`);
+        const resp = await fetch(urlBase, {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(120000),
+        });
+        if (resp.status === 429) throw new Error(`Pollinations rate limited (429) for scene ${index + 1}`);
+        if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+        const imgBuf = Buffer.from(await resp.arrayBuffer());
+        if (imgBuf.byteLength < 5000) throw new Error(`Pollinations empty image (${imgBuf.byteLength} bytes)`);
+        console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+        return cropAndCompressToPortrait(imgBuf);
       });
-      if (resp.status === 429) throw new Error(`Pollinations rate limited (429) for scene ${index + 1}`);
-      if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
-      const imgBuf = Buffer.from(await resp.arrayBuffer());
-      if (imgBuf.byteLength < 5000) throw new Error(`Pollinations empty image (${imgBuf.byteLength} bytes)`);
-      console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-      return cropAndCompressToPortrait(imgBuf);
-    });
+    } catch (paidErr: any) {
+      // FIX: paid key failed (e.g. 500 queue full/legacy endpoint) — fall through to anonymous
+      console.warn(`     ⚠ Pollinations paid key failed scene ${index + 1} — trying anonymous: ${paidErr.message?.slice(0, 80)}`);
+    }
   }
-
-  // Anonymous free tier with exponential backoff
   console.log(`     → Pollinations AI (anonymous): scene ${index + 1}...`);
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
@@ -1155,37 +1158,34 @@ async function runPipeline(schedule: any): Promise<void> {
     console.log(`     → Caption ready | Hashtags: ${hashtags.split(' ').length} tags`);
     if (postId) await supabase.from('posts').update({ caption, hashtags }).eq('id', postId);
 
-    // 4. Background music + scene images — run FULLY in parallel
-    console.log('  4/8 Generating 5 scene images + downloading music (parallel)...');
+    // FIX: Sequential image generation — parallel calls hit Cloudflare rate limit simultaneously.
+    // Music downloads concurrently while images are generated one at a time.
+    console.log('  4/8 Generating 5 scene images (sequential) + downloading music (parallel)...');
     const videoVariant = Math.floor((Date.now() / 1000) % 10000);
     const imageSlots: Array<string | null> = new Array(scenes.length).fill(null);
 
-    await Promise.all([
-      // Music download runs in parallel with image generation
-      downloadBackgroundMusic(tmpDir).then(path => {
-        (imageSlots as any)._musicPath = path;
-      }),
-      // All 5 images generate in parallel
-      ...scenes.map(async (scene, i) => {
-        try {
-          const imgBuf = await generateImage(scene, i, videoVariant);
-          const imgPath = join(tmpDir, `scene_${i}.jpg`);
-          writeFileSync(imgPath, imgBuf);
-          imageSlots[i] = imgPath;
-          console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-        } catch (e: any) {
-          console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message?.slice(0, 80)} — using gradient`);
-          const pp = join(tmpDir, `scene_${i}.jpg`);
+    const [musicPath] = await Promise.all([
+      downloadBackgroundMusic(tmpDir),
+      (async () => {
+        for (let i = 0; i < scenes.length; i++) {
           try {
-            const gradients = ['gradient:#0d0d2b-#1a0030', 'gradient:#0a1628-#1a2855', 'gradient:#1a0000-#3d0010', 'gradient:#001a1a-#00333a', 'gradient:#1a1500-#3d3000'];
-            execSync(`convert -size 1080x1920 "${gradients[i % gradients.length]}" -quality 75 "${pp}" 2>/dev/null`);
-            if (existsSync(pp) && statSync(pp).size > 500) imageSlots[i] = pp;
-          } catch { /* skip this scene */ }
+            const imgBuf = await generateImage(scenes[i], i, videoVariant);
+            const imgPath = join(tmpDir, `scene_${i}.jpg`);
+            writeFileSync(imgPath, imgBuf);
+            imageSlots[i] = imgPath;
+            console.log(`     → Scene ${i + 1}/${scenes.length}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+          } catch (e: any) {
+            console.warn(`     ⚠ Scene ${i + 1} failed: ${e.message?.slice(0, 80)} — using gradient`);
+            const pp = join(tmpDir, `scene_${i}.jpg`);
+            try {
+              const gradients = ['gradient:#0d0d2b-#1a0030', 'gradient:#0a1628-#1a2855', 'gradient:#1a0000-#3d0010', 'gradient:#001a1a-#00333a', 'gradient:#1a1500-#3d3000'];
+              execSync(`convert -size 1080x1920 "${gradients[i % gradients.length]}" -quality 75 "${pp}" 2>/dev/null`);
+              if (existsSync(pp) && statSync(pp).size > 500) imageSlots[i] = pp;
+            } catch { /* skip this scene */ }
+          }
         }
-      }),
+      })(),
     ]);
-
-    const musicPath: string | null = (imageSlots as any)._musicPath ?? null;
     const imagePaths = imageSlots.filter((p): p is string => p !== null && typeof p === 'string');
     if (imagePaths.length === 0) {
       throw new Error('All scene images failed to generate — cannot create video');

@@ -626,19 +626,24 @@ async function generateImageWithPollinations(sceneDesc: string, index: number, s
   const hasKeys = (polKeyRows ?? []).length > 0;
 
   if (hasKeys) {
-    return tryWithKeys('pollinations', async (key) => {
-      console.log(`     → Pollinations AI (key-auth): scene ${index + 1}...`);
-      const resp = await fetch(urlBase, {
-        headers: { Authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(120000),
+    try {
+      return await tryWithKeys('pollinations', async (key) => {
+        console.log(`     → Pollinations AI (key-auth): scene ${index + 1}...`);
+        const resp = await fetch(urlBase, {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(120000),
+        });
+        if (resp.status === 429) throw new Error(`Pollinations rate limited (429) for scene ${index + 1}`);
+        if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+        const imgBuf = Buffer.from(await resp.arrayBuffer());
+        if (imgBuf.byteLength < 5000) throw new Error(`Pollinations empty image (${imgBuf.byteLength} bytes)`);
+        console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
+        return cropAndCompressToPortrait(imgBuf);
       });
-      if (resp.status === 429) throw new Error(`Pollinations rate limited (429) for scene ${index + 1}`);
-      if (!resp.ok) throw new Error(`Pollinations (scene ${index + 1}) ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
-      const imgBuf = Buffer.from(await resp.arrayBuffer());
-      if (imgBuf.byteLength < 5000) throw new Error(`Pollinations empty image (${imgBuf.byteLength} bytes)`);
-      console.log(`     → Pollinations scene ${index + 1}: ${(imgBuf.byteLength / 1024).toFixed(0)} KB ✓`);
-      return cropAndCompressToPortrait(imgBuf);
-    });
+    } catch (paidErr: any) {
+      // FIX: paid key failed (e.g. 500 "Queue full"/legacy endpoint) — fall through to anonymous
+      console.warn(`     ⚠ Pollinations paid key failed scene ${index + 1} — trying anonymous: ${paidErr.message?.slice(0, 80)}`);
+    }
   }
 
   console.log(`     → Pollinations AI (anonymous): scene ${index + 1}...`);

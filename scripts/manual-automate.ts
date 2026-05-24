@@ -214,33 +214,41 @@ VOICEOVER RULES (the "script" field):
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
 SCENE RULES (the "scenes" array):
-- Exactly 5 scenes — each scene MUST visually represent the SPECIFIC PART of the script being narrated at that moment
-- Scene 1 (script opening / shocking hook): Ultra-wide dramatic establishing shot that conveys the scale and shock of the scam
-- Scene 2 (explaining the scam mechanism): Extreme close-up showing the exact deception method — hands, devices, screens in action
-- Scene 3 (victim impact / human cost): Emotional medium shot — a real person's devastation, grief, or shock at financial loss
-- Scene 4 (the perpetrators / criminal side): Low-angle menacing shot — anonymous threatening figure, hidden identity, surveillance feel
-- Scene 5 (warning / closing CTA): High-angle or stark frontal symbolic shot — danger signal, vulnerability, urgent alarm
-- CRITICAL: Every scene MUST use a completely different visual composition, angle, and color palette — NO two scenes may look alike:
-  * Scene 1: ultra-wide angle, cold blue-teal environment, vast dark atmosphere
-  * Scene 2: extreme close-up macro, warm amber-orange glow on screens or hands
-  * Scene 3: medium shot, desaturated muted tones, soft dramatic rim lighting
-  * Scene 4: low angle, deep crimson-red accent light, high contrast threatening shadows
-  * Scene 5: overhead or stark frontal, bold red-orange warning palette, geometric composition
-- Each scene description must be highly specific: exact subject, action, lighting angle, atmosphere, and unique visual detail
+- Exactly 5 scenes — each scene is the VISUAL TRANSLATION of the specific moment in the voiceover being narrated
+- CRITICAL ALIGNMENT: read the voiceover first, divide it mentally into 5 roughly equal segments, then write a scene that SHOWS what each segment is DESCRIBING:
+  * Scene 1 = the HOOK segment: a visual that embodies the shocking statistic or dramatic opening fact
+  * Scene 2 = the MECHANISM segment: a visual that depicts HOW the specific scam type actually operates
+  * Scene 3 = the VICTIM segment: a visual of the human cost — the emotional aftermath of being deceived
+  * Scene 4 = the PERPETRATOR segment: a visual representing the criminal actor or deceptive infrastructure
+  * Scene 5 = the WARNING/CTA segment: a visual conveying danger, urgency, and the call to protect yourself
+- TOPIC LOCK: every scene description MUST visually reflect the EXACT scam type and topic — generic imagery is forbidden:
+  * Bad: "shadowy figure at a computer" (generic, works for any topic)
+  * Good: "a victim's phone screen showing a fake AI deepfake video call of a celebrity endorsing a crypto scheme, amber light reflecting on their horrified face" (specific to this topic)
+- COMPOSITION DIVERSITY: no two scenes may share the same camera angle, distance, or dominant color palette:
+  * Scene 1: ultra-wide or aerial — establishes massive scale of the scam
+  * Scene 2: extreme macro close-up — reveals the deceptive detail up close
+  * Scene 3: intimate medium shot — human emotional weight, desaturated palette
+  * Scene 4: low-angle menacing — threatening presence, high-contrast dark lighting
+  * Scene 5: overhead or stark frontal — symbolic, geometric, warning-palette composition
+- VISUAL SPECIFICITY REQUIREMENTS per scene:
+  * Name the exact subjects (specific device types, specific human reactions, specific environments)
+  * Name the exact lighting source and direction (single side-key light, top-down overhead, warm backlight)
+  * Name the exact color temperature (cold blue-teal, warm amber, desaturated gray, deep crimson, red-orange)
+  * Include one unique environmental micro-detail that makes this scene unmistakably about THIS topic
 - Pure VISUAL description only — NO text, NO words, NO letters, NO numbers in any scene description
-- NO "Scene 1:" prefix or labels — just the visual description directly
-- Portrait 9:16 cinematic aspect ratio, photorealistic
+- NO "Scene 1:" prefix or labels — just the raw visual description
+- Portrait 9:16 cinematic aspect ratio, photorealistic, single frame
 
 Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 {
   "title": "Viral TikTok warning title, under 80 characters, no emojis, no first-person",
   "script": "Pure spoken voiceover paragraph — journalistic, no first-person, no labels",
   "scenes": [
-    "Ultra-wide shot of a massive dark server room with thousands of blinking lights stretching to the horizon, one lone figure hunched at a glowing terminal in the distance, cold blue-teal atmosphere",
-    "Extreme close-up of trembling fingers scrolling a phone screen showing a crypto wallet draining in real time, warm amber backlight, shallow depth of field, sweat on fingertip",
-    "Medium shot of a middle-aged person sitting alone at a kitchen table at night, head in hands, soft desaturated light, crumpled papers and empty coffee mug visible, emotional despair",
-    "Low-angle shot looking up at a silhouetted hooded figure standing against a bank of glowing red monitors, crimson light casting harsh shadows upward, menacing and anonymous",
-    "Overhead aerial shot looking straight down at an empty leather wallet lying open on black marble, single golden coin beside it, stark red-orange rim light, geometric and symbolic"
+    "[SCENE 1 — HOOK: Replace with ultra-wide establishing image that SHOWS the shocking scale or nature of the specific scam described in the opening voiceover sentence. Include exact subject, dominant cold color, and environment.]",
+    "[SCENE 2 — MECHANISM: Replace with extreme macro close-up that SHOWS the actual deception mechanism of this specific scam — the exact fake interface, document, or action being described in the voiceover at this point. Include warm amber light on the subject.]",
+    "[SCENE 3 — VICTIM IMPACT: Replace with intimate medium shot that SHOWS a real human experiencing the emotional aftermath of this specific scam type. Must be desaturated, soft, and emotionally resonant with the voiceover's victim narrative moment.]",
+    "[SCENE 4 — PERPETRATORS: Replace with low-angle menacing shot that SHOWS the anonymous criminal actor or technical infrastructure behind THIS specific scam. Must use deep crimson-red accent light and a threatening, surveillance-camera perspective.]",
+    "[SCENE 5 — WARNING CTA: Replace with overhead or stark frontal symbolic shot that SHOWS a danger/loss symbol specific to this scam type. Must use red-orange warning palette and convey urgency matching the CTA moment of the voiceover.]"
   ]
 }`;
 
@@ -252,12 +260,14 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
       if (match) {
         const parsed = JSON.parse(match[0]);
         const rawScenes: string[] = Array.isArray(parsed.scenes) ? parsed.scenes : [];
+        // Fallback scenes are dynamically derived from the topic so they are at least topic-specific.
+        // Each has a distinct composition/angle/color to avoid visual repetition.
         const defaultScenes = [
-          `${topic} — shadowy hacker figure at multiple monitors, dark dramatic lighting, cinematic vertical`,
-          `${topic} — crashing red stock charts on screen, person looking shocked, dark office environment`,
-          `${topic} — pile of Bitcoin and dollar bills vanishing, dramatic dark atmosphere, cinematic`,
-          `${topic} — anonymous hooded figure in dimly lit room, suspicious activity, blue neon lighting`,
-          `${topic} — glowing warning signs and digital lock icons, dark background, dramatic cinematic`,
+          `Ultra-wide establishing shot — a vast dark digital landscape representing the scale of ${topic}: dozens of phantom transaction lines flowing across an infinite dark grid, cold blue-teal glow, depth-of-field blur in the deep background`,
+          `Extreme macro close-up — trembling hands hovering over a glowing screen displaying a fake ${topic} interface in real time, warm amber backlight, shallow depth of field, sweat visible on fingertip pressing the screen`,
+          `Intimate medium shot — a middle-aged person alone at a dark kitchen table, head buried in hands, soft desaturated gray light, scattered documents visible, embodying the human cost of the ${topic} scheme`,
+          `Low-angle menacing shot — a silhouetted figure in a hoodie standing before glowing red server racks that represent the infrastructure behind ${topic}, deep crimson accent light casting harsh upward shadows, anonymous and threatening`,
+          `Overhead aerial symbolic shot — an empty open wallet lying flat on cold dark marble, a single gold coin beside it casting a long shadow, stark red-orange warning rim light, geometric and sparse, representing ${topic} victims`,
         ];
         const scenes = rawScenes.length >= 5 ? rawScenes.slice(0, 5) : [...rawScenes, ...defaultScenes.slice(rawScenes.length)];
         let _scriptText = '';
@@ -285,15 +295,16 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
       }
     } catch { /* fall through */ }
 
+    // Emergency fallback — still topic-specific with diverse compositions
     return {
       title: topic.slice(0, 150),
       script: `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
       scenes: [
-        `${topic} crypto scam warning — shadowy figure at computer, dark dramatic atmosphere, cinematic 9:16`,
-        `${topic} — victim looking at empty crypto wallet on screen, shocked expression, dark room`,
-        `${topic} — anonymous hacker in hoodie with multiple screens, blue neon lighting, dramatic`,
-        `${topic} — digital vault cracking open and disappearing, dark cinematic atmosphere`,
-        `${topic} — person crying while looking at phone with financial loss, dramatic dark lighting`,
+        `Ultra-wide cold blue-teal shot — a dark sprawling digital network map representing the ${topic} operation, thousands of phantom connection lines spreading across an infinite dark grid, ominous scale`,
+        `Extreme macro close-up — a finger hovering over a glowing touchscreen showing a fraudulent ${topic} interface, warm amber backlight, shallow depth of field, sweat on fingertip, intense and immediate`,
+        `Intimate desaturated medium shot — an isolated person alone at a dimly lit table, head down, hands covering face, crumpled papers scattered around, embodying the despair of ${topic} victims`,
+        `Low-angle menacing shot looking upward — a dark hooded anonymous figure standing over a glowing red keyboard, crimson light raking upward across their concealed face, surveillance cameras visible in background`,
+        `Overhead stark frontal shot — an empty open wallet lying flat on cold black marble, single coin casting a dramatic shadow, bold red-orange warning rim light, geometric isolation representing ${topic} losses`,
       ],
     };
   });
@@ -508,37 +519,45 @@ function buildSubtitleTimingsFromWords(
 
 // ─── Image Generation ──────────────────────────────────────────────────────────
 
-const SCENE_CINEMATIC_STYLES = [
-  'ultra-wide angle lens, vast dark environment, cold blue-teal color grade, extreme depth of field, large scale and distance',
-  'extreme close-up macro shot, warm amber-orange glow, very shallow depth of field, fine texture visible, intimate and intense',
-  'medium shot, desaturated muted gray tones, soft dramatic rim lighting from one side, human emotional weight, documentary style',
-  'low-angle looking upward, deep crimson-red accent light casting harsh upward shadows, menacing and threatening perspective',
-  'overhead bird-eye or stark frontal view, bold red-orange warning color palette, geometric and symbolic composition, graphic impact',
-];
-
+// ATMOSPHERIC_VARIATIONS: additive cinematic detail layered on top of the LLM-generated scene description.
+// NOTE: SCENE_CINEMATIC_STYLES was removed — it was the root cause of repetitive/generic visuals.
+// The LLM's generateScript prompt now produces rich, topic-specific scene descriptions that already
+// embed the correct cinematic style per scene. buildImagePrompt no longer overrides those styles;
+// it only adds the universal technical requirements + a unique atmospheric micro-detail.
 const ATMOSPHERIC_VARIATIONS = [
-  'volumetric light rays piercing through dense atmosphere',
-  'dust particles visible drifting through frame in foreground',
-  'steam or vapor curling through the scene background',
-  'reflections visible in rain-slicked surface below',
-  'subtle lens flare streak from extreme edge of frame',
-  'fog bank rolling in from background distance',
-  'overexposed highlights creating stark dramatic silhouette',
-  'atmospheric haze softening deep background elements',
-  'backlit rim-lighting creating sharp edge glow around subjects',
-  'smoke trails drifting upward through beams of light',
-  'condensation or breath visible in cold environment',
-  'shallow water surface reflections in extreme foreground',
+  'volumetric light rays piercing through dense smoke-filled atmosphere',
+  'micro dust particles drifting slowly through the foreground in sharp focus',
+  'steam or breath vapor curling through a cold environment in the background',
+  'wet surface reflections shimmering in rain-slicked ground at the very bottom of frame',
+  'subtle anamorphic lens flare streak cutting diagonally across the extreme edge of frame',
+  'thick rolling fog bank creeping in from the deep background, obscuring distant shapes',
+  'harsh overexposed highlights creating a stark blown-out silhouette against the background',
+  'deep atmospheric haze blending and softening distant background layers into abstraction',
+  'sharp backlit rim-lighting carving a precise glowing edge around the primary subject',
+  'thin smoke trails rising slowly from an unseen source through shafts of directional light',
+  'visible cold breath condensation hanging frozen in frigid dim air around the subject',
+  'shallow puddle surface reflections distorting the scene geometry in extreme foreground',
+  'heat shimmer distortion rising from a hot surface in the deep background',
+  'single shaft of hard directional light cutting through absolute darkness at a steep angle',
+  'translucent lens flare prism splitting light into spectral colours across the upper frame',
+  'heavy chromatic aberration fringing the high-contrast edges, adding digital tension',
 ];
 
+// buildImagePrompt — trusts the LLM-generated scene description as the primary visual directive.
+// It no longer replaces or overrides the scene's cinematic style; it only appends:
+//   1. A unique atmospheric micro-detail (varies by scene index × video variant for cross-video diversity)
+//   2. Universal technical requirements (portrait ratio, no text, photorealistic, single frame)
+// This ensures every image is directly derived from its specific voiceover moment.
 function buildImagePrompt(sceneDesc: string, index: number = 0, videoVariant: number = 0): string {
+  // Strip scene-number prefixes and bracketed stage directions but keep the full visual description
   const cleanDesc = sceneDesc.replace(/[Ss]cene\s+\d+[:\-]?\s*/g, '').replace(/\[.*?\]/g, '').trim();
-  const styleModifier = SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length];
-  const atmosphericDetail = ATMOSPHERIC_VARIATIONS[(index + videoVariant) % ATMOSPHERIC_VARIATIONS.length];
+  // Use a multiply-and-offset formula so each (scene, video) pair picks a DIFFERENT atmospheric detail
+  // even when index alone or videoVariant alone would collide.
+  const atmIdx = ((index * 5) + videoVariant + Math.floor(videoVariant / ATMOSPHERIC_VARIATIONS.length)) % ATMOSPHERIC_VARIATIONS.length;
+  const atmosphericDetail = ATMOSPHERIC_VARIATIONS[atmIdx];
   return [
     cleanDesc,
-    styleModifier + '.',
-    `Atmospheric detail: ${atmosphericDetail}.`,
+    `Atmospheric cinematic detail: ${atmosphericDetail}.`,
     'Portrait orientation 9:16 vertical aspect ratio, full-frame single image, professional cinematic photography, photorealistic, ultra high quality.',
     'STRICT: absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO subtitles, NO watermarks, NO labels, NO signs, NO titles anywhere in the image — pure visual only.',
     'Do NOT split into panels or multiple images. Single full-frame portrait scene only.',
@@ -586,8 +605,10 @@ async function generateImageWithCloudflare(sceneDesc: string, index: number, vid
 
 async function generateImageWithPollinations(sceneDesc: string, index: number, simplify = false, videoVariant: number = 0): Promise<Buffer> {
   const baseDesc = simplify ? sceneDesc.slice(0, 200) : sceneDesc;
+  // When simplify=true (retry fallback) we still build from the LLM scene description.
+  // We just trim it and strip heavy cinematic language to avoid prompt-length errors.
   const prompt = simplify
-    ? `${baseDesc} ${SCENE_CINEMATIC_STYLES[index % SCENE_CINEMATIC_STYLES.length]} portrait 9:16 photorealistic no text no words`
+    ? buildImagePrompt(baseDesc.slice(0, 220), index, videoVariant)
     : buildImagePrompt(baseDesc, index, videoVariant);
   const seed = (Math.floor(Math.random() * 899999) + 100000) ^ (videoVariant * 7919);
   const encodedPrompt = encodeURIComponent(prompt.slice(0, 1500));

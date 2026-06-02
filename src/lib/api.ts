@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { ApiKey, ManualJob, AppNotification, Post, Schedule } from '../types';
+import { ApiKey, ManualJob, AppNotification, Post, Schedule, TelegramSettings, AgentInstruction } from '../types';
 
 const SUPABASE_URL: string =
   (import.meta as any).env?.VITE_SUPABASE_URL || '';
@@ -360,4 +360,133 @@ export function subscribeToApiKeys(callback: (payload: { eventType: string; key:
     })
     .subscribe();
   return () => { supabase.removeChannel(channel); };
+}
+
+// ─── Telegram Settings API ─────────────────────────────────────────────────────
+
+export async function fetchTelegramSettings(userId: string): Promise<TelegramSettings | null> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from('telegram_settings')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return (data as TelegramSettings | null);
+}
+
+export async function saveTelegramSettings(
+  userId: string,
+  settings: { api_id: string; api_hash: string; session_string: string; target_chat: string }
+): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase
+    .from('telegram_settings')
+    .upsert({
+      user_id: userId,
+      api_id: settings.api_id.trim(),
+      api_hash: settings.api_hash.trim(),
+      session_string: settings.session_string.trim(),
+      target_chat: (settings.target_chat || 'claw').replace(/^@/, '').trim(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteTelegramSettings(userId: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase
+    .from('telegram_settings')
+    .delete()
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message);
+}
+
+// ─── Agent Instructions API ────────────────────────────────────────────────────
+
+export async function fetchAgentInstructions(userId: string): Promise<AgentInstruction[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('agent_instructions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) { console.warn('fetchAgentInstructions error:', error.message); return []; }
+  return (data ?? []) as AgentInstruction[];
+}
+
+export async function addAgentInstruction(userId: string, instruction: string): Promise<AgentInstruction> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { data, error } = await supabase
+    .from('agent_instructions')
+    .insert([{ user_id: userId, instruction: instruction.trim() }])
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data as AgentInstruction;
+}
+
+export async function updateAgentInstruction(id: string, instruction: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase
+    .from('agent_instructions')
+    .update({ instruction: instruction.trim() })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteAgentInstruction(id: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase
+    .from('agent_instructions')
+    .delete()
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ─── Send to Agent (Manual Delivery) ──────────────────────────────────────────
+
+export async function sendToAgent(
+  userId: string,
+  post: { id: string; video_url: string; title?: string; caption?: string; hashtags?: string }
+): Promise<{ ok: boolean; dispatched: boolean }> {
+  if (!supabase) throw new Error('Supabase not configured');
+
+  const { data: queueRow, error: queueErr } = await supabase
+    .from('telegram_delivery_queue')
+    .insert([{
+      user_id: userId,
+      post_id: post.id,
+      video_url: post.video_url,
+      title: post.title ?? null,
+      caption: post.caption ?? null,
+      hashtags: post.hashtags ?? null,
+      status: 'pending',
+    }])
+    .select()
+    .single();
+
+  if (queueErr) throw new Error(queueErr.message);
+
+  let dispatched = false;
+  if (FUNCS_BASE) {
+    try {
+      const res = await fetch(`${FUNCS_BASE}/send-to-agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          postId: post.id,
+          videoUrl: post.video_url,
+          title: post.title,
+          caption: post.caption,
+          hashtags: post.hashtags,
+          queueId: (queueRow as any)?.id,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      dispatched = json?.dispatched === true;
+    } catch { /* Non-fatal — queue will be picked up on next pipeline run */ }
+  }
+
+  return { ok: true, dispatched };
 }

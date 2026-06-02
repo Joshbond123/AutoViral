@@ -4,11 +4,14 @@ import {
   Key, Trash2, Plus, Eye, EyeOff, Check, X,
   AlertCircle, Database, Loader2, RefreshCw,
   Activity, Clock, TrendingUp, Shield, Image,
+  Send, Bot, MessageSquare, ListChecks, Pencil, ExternalLink, Info,
 } from 'lucide-react';
-import { ApiKey } from '../types';
+import { ApiKey, TelegramSettings, AgentInstruction } from '../types';
 import {
   fetchApiKeys, addApiKey, deleteApiKey, toggleApiKey,
   updateApiKeyValue, resetKeyStatus, subscribeToApiKeys,
+  fetchTelegramSettings, saveTelegramSettings, deleteTelegramSettings,
+  fetchAgentInstructions, addAgentInstruction, deleteAgentInstruction, updateAgentInstruction,
 } from '../lib/api';
 import { HAS_SUPABASE } from '../lib/supabase';
 
@@ -99,11 +102,13 @@ function StatusBadge({ status }: { status: KeyStatus }) {
 }
 
 export default function Settings() {
+  const userId = typeof window !== 'undefined' ? localStorage.getItem('tiktok_user_id') || '' : '';
+
   return (
     <div className="max-w-3xl">
       <div className="mb-8 md:mb-12">
         <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Platform Settings</h1>
-        <p className="text-white/40 text-sm md:text-base">Manage API credentials with automatic key rotation and intelligent fallback.</p>
+        <p className="text-white/40 text-sm md:text-base">Manage API credentials, Telegram integration, and agent delivery instructions.</p>
       </div>
 
       <div className="space-y-6 md:space-y-8">
@@ -122,6 +127,8 @@ export default function Settings() {
         <RotationBanner />
         <FallbackBanner />
         <ApiKeyManager />
+        {userId && <TelegramManager userId={userId} />}
+        {userId && <AgentInstructionsManager userId={userId} />}
       </div>
     </div>
   );
@@ -209,6 +216,414 @@ function FallbackBanner() {
     </div>
   );
 }
+
+// ─── Telegram Integration Manager ─────────────────────────────────────────────
+
+function TelegramManager({ userId }: { userId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [apiId, setApiId] = useState('');
+  const [apiHash, setApiHash] = useState('');
+  const [sessionString, setSessionString] = useState('');
+  const [targetChat, setTargetChat] = useState('claw');
+  const [showSession, setShowSession] = useState(false);
+  const [hasExisting, setHasExisting] = useState(false);
+
+  useEffect(() => {
+    if (!HAS_SUPABASE) { setLoading(false); return; }
+    (async () => {
+      try {
+        const data = await fetchTelegramSettings(userId);
+        if (data) {
+          setApiId(data.api_id || '');
+          setApiHash(data.api_hash || '');
+          setSessionString(data.session_string || '');
+          setTargetChat(data.target_chat || 'claw');
+          setHasExisting(true);
+        }
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [userId]);
+
+  const handleSave = async () => {
+    if (!apiId.trim() || !apiHash.trim() || !sessionString.trim()) {
+      setError('API ID, API Hash, and Session String are all required.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await saveTelegramSettings(userId, { api_id: apiId, api_hash: apiHash, session_string: sessionString, target_chat: targetChat });
+      setHasExisting(true);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!confirm('Remove Telegram credentials? The pipeline will no longer auto-deliver videos.')) return;
+    setClearing(true);
+    try {
+      await deleteTelegramSettings(userId);
+      setApiId(''); setApiHash(''); setSessionString(''); setTargetChat('claw');
+      setHasExisting(false);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
+      <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
+              <Bot size={18} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm md:text-base">Telegram Integration</h3>
+                {hasExisting && (
+                  <span className="text-[9px] font-mono uppercase tracking-widest text-green-400/80 border border-green-500/20 px-2 py-0.5 rounded-full bg-green-500/5">
+                    Connected
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-white/40 mt-0.5">Auto-deliver generated videos to your Telegram agent at t.me/claw</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 md:p-8 space-y-6">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-white/20 text-sm">
+            <Loader2 size={16} className="animate-spin" /> Loading…
+          </div>
+        ) : (
+          <>
+            <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-blue-500/5 border border-blue-500/15">
+              <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
+              <div className="text-xs text-white/50 leading-relaxed space-y-1.5">
+                <p><strong className="text-blue-400">How to get credentials:</strong></p>
+                <p>1. Visit <a href="https://my.telegram.org" target="_blank" rel="noopener" className="text-blue-400 underline underline-offset-2">my.telegram.org</a> → API development tools → create an app to get your <strong>API ID</strong> and <strong>API Hash</strong>.</p>
+                <p>2. Generate a <strong>Session String</strong> by running: <code className="bg-white/10 px-1 rounded font-mono text-[10px]">npx tsx scripts/gen-session.ts</code> locally after cloning the repo, or use any Telethon/GramJS session generator.</p>
+                <p>3. The <strong>Target Chat</strong> is the Telegram username to send to (without @). Default: <code className="bg-white/10 px-1 rounded font-mono text-[10px]">claw</code></p>
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">API ID</label>
+                <input
+                  type="text"
+                  value={apiId}
+                  onChange={e => setApiId(e.target.value)}
+                  placeholder="12345678"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono transition-all"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">API Hash</label>
+                <input
+                  type="password"
+                  value={apiHash}
+                  onChange={e => setApiHash(e.target.value)}
+                  placeholder="a1b2c3d4e5f6g7h8i9j0…"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">Session String</label>
+                <button
+                  onClick={() => setShowSession(v => !v)}
+                  className="text-[10px] text-white/30 hover:text-white transition-all flex items-center gap-1"
+                >
+                  {showSession ? <EyeOff size={10} /> : <Eye size={10} />}
+                  {showSession ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <textarea
+                value={sessionString}
+                onChange={e => setSessionString(e.target.value)}
+                placeholder="1BQANOTEuMTg1LjE0MC4xMjcBu5aUh4X…  (paste your full GramJS/Telethon session string)"
+                rows={showSession ? 4 : 2}
+                className={`w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:outline-none focus:border-blue-500/50 font-mono transition-all resize-none ${!showSession ? 'text-white/20' : ''}`}
+                style={!showSession ? { WebkitTextSecurity: 'disc' } as any : {}}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">Target Chat Username</label>
+              <div className="flex items-center gap-2">
+                <span className="text-white/30 font-mono text-sm">@</span>
+                <input
+                  type="text"
+                  value={targetChat}
+                  onChange={e => setTargetChat(e.target.value.replace(/^@/, ''))}
+                  placeholder="claw"
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono transition-all"
+                />
+                <a
+                  href={`https://t.me/${targetChat || 'claw'}`}
+                  target="_blank"
+                  rel="noopener"
+                  className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/30 hover:text-white transition-all"
+                >
+                  <ExternalLink size={14} />
+                </a>
+              </div>
+            </div>
+
+            {error && (
+              <p className="flex items-center gap-2 text-red-400 text-xs px-1">
+                <AlertCircle size={13} /> {error}
+              </p>
+            )}
+
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all disabled:opacity-50"
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : <Send size={14} />}
+                {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Telegram Settings'}
+              </button>
+              {hasExisting && (
+                <button
+                  onClick={handleClear}
+                  disabled={clearing}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-red-500/10 text-white/40 hover:text-red-400 border border-white/5 text-sm font-medium transition-all disabled:opacity-40"
+                >
+                  {clearing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  Clear
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Agent Instructions Manager ────────────────────────────────────────────────
+
+function AgentInstructionsManager({ userId }: { userId: string }) {
+  const [instructions, setInstructions] = useState<AgentInstruction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newText, setNewText] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!HAS_SUPABASE) { setLoading(false); return; }
+    try {
+      const data = await fetchAgentInstructions(userId);
+      setInstructions(data);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!newText.trim()) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const ins = await addAgentInstruction(userId, newText.trim());
+      setInstructions(prev => [...prev, ins]);
+      setNewText('');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleStartEdit = (ins: AgentInstruction) => {
+    setEditingId(ins.id);
+    setEditText(ins.instruction);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId || !editText.trim()) return;
+    setSavingEdit(true);
+    try {
+      await updateAgentInstruction(editingId, editText.trim());
+      setInstructions(prev => prev.map(i => i.id === editingId ? { ...i, instruction: editText.trim() } : i));
+      setEditingId(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this instruction?')) return;
+    setDeletingId(id);
+    try {
+      await deleteAgentInstruction(id);
+      setInstructions(prev => prev.filter(i => i.id !== id));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="glass rounded-2xl md:rounded-[32px] border border-white/5 overflow-hidden">
+      <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-brand-secondary/10 flex items-center justify-center text-brand-secondary shrink-0">
+            <ListChecks size={18} />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm md:text-base">Agent Instructions</h3>
+            <p className="text-xs text-white/40 mt-0.5">Instructions sent with every video delivered to your Telegram agent.</p>
+          </div>
+          <span className="ml-auto text-[10px] font-mono uppercase tracking-widest text-white/20">
+            {instructions.length} instruction{instructions.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+
+      <div className="p-5 md:p-8 space-y-4">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-white/20 text-sm">
+            <Loader2 size={16} className="animate-spin" /> Loading…
+          </div>
+        ) : (
+          <>
+            {instructions.length === 0 && (
+              <div className="flex items-center gap-3 p-4 rounded-xl border border-dashed border-white/10 bg-white/[0.015]">
+                <MessageSquare size={14} className="text-white/20 shrink-0" />
+                <p className="text-xs text-white/30 font-mono">No instructions yet — add one below to have it sent with every video delivery.</p>
+              </div>
+            )}
+
+            <AnimatePresence>
+              {instructions.map((ins) => (
+                <motion.div
+                  key={ins.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.025] border border-white/5 group"
+                >
+                  <MessageSquare size={13} className="text-brand-secondary/60 shrink-0 mt-0.5" />
+                  {editingId === ins.id ? (
+                    <div className="flex-1 space-y-2">
+                      <textarea
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        rows={3}
+                        autoFocus
+                        className="w-full bg-white/5 border border-white/15 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-brand-secondary/50 resize-none"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleSaveEdit}
+                          disabled={savingEdit}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-secondary/20 hover:bg-brand-secondary/30 text-brand-secondary text-xs font-medium transition-all disabled:opacity-50"
+                        >
+                          {savingEdit ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 text-xs font-medium transition-all"
+                        >
+                          <X size={11} /> Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="flex-1 text-sm text-white/80 leading-relaxed">{ins.instruction}</p>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                        <button
+                          onClick={() => handleStartEdit(ins)}
+                          className="p-1.5 rounded-lg hover:bg-white/10 text-white/30 hover:text-white transition-all"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(ins.id)}
+                          disabled={deletingId === ins.id}
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/30 hover:text-red-400 transition-all disabled:opacity-30"
+                        >
+                          {deletingId === ins.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            <div className="space-y-2">
+              <textarea
+                value={newText}
+                onChange={e => setNewText(e.target.value)}
+                placeholder="Add a new instruction… e.g. 'Always respond in English' or 'Tag this as urgent if views exceed 10k'"
+                rows={3}
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-brand-secondary/50 resize-none transition-all"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); handleAdd(); }
+                }}
+              />
+              {error && (
+                <p className="flex items-center gap-2 text-red-400 text-xs">
+                  <AlertCircle size={12} /> {error}
+                </p>
+              )}
+              <button
+                onClick={handleAdd}
+                disabled={adding || !newText.trim()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-secondary/20 hover:bg-brand-secondary/30 text-brand-secondary text-sm font-medium transition-all disabled:opacity-40"
+              >
+                {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                {adding ? 'Adding…' : 'Add Instruction'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── API Key Manager ───────────────────────────────────────────────────────────
 
 function ApiKeyManager() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -531,116 +946,86 @@ function ApiKeyManager() {
                             <motion.div
                               key={key.id}
                               layout
-                              className={`bg-black/20 rounded-xl border overflow-hidden ${
-                                key.status === 'rate_limited'
-                                  ? 'border-yellow-500/20'
-                                  : key.status === 'failed'
-                                  ? 'border-red-500/20'
-                                  : 'border-white/5'
+                              className={`rounded-xl border overflow-hidden ${
+                                !key.is_active ? 'opacity-50 border-white/5' :
+                                key.status === 'failed' ? 'border-red-500/20 bg-red-500/5' :
+                                key.status === 'rate_limited' ? 'border-yellow-500/20 bg-yellow-500/5' :
+                                'border-white/5'
                               }`}
                             >
-                              {editingId === key.id ? (
-                                <div className="p-4 space-y-3">
+                              <div className="flex items-center gap-3 px-4 py-3">
+                                <span className="text-[10px] font-mono text-white/20 w-4 shrink-0">#{keyIdx + 1}</span>
+
+                                {editingId === key.id ? (
                                   <input
                                     type="text"
                                     value={editValue}
                                     onChange={e => setEditValue(e.target.value)}
-                                    placeholder={placeholder}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm font-mono focus:outline-none focus:border-brand-primary/50"
+                                    autoFocus
+                                    className="flex-1 bg-transparent border-b border-brand-primary/40 text-xs font-mono focus:outline-none py-0.5 min-w-0"
                                   />
-                                  <div className="flex gap-2">
-                                    <button onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 rounded-lg tiktok-gradient text-xs font-bold disabled:opacity-50">
-                                      {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                      {saving ? 'Saving…' : 'Save'}
-                                    </button>
-                                    <button onClick={() => setEditingId(null)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-all">
-                                      <X size={12} /> Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="p-4">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                                      <div className={`p-1.5 rounded-lg ${group.accentBg} ${group.color} shrink-0 mt-0.5`}>
-                                        <Key size={13} />
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                                          <StatusBadge status={(key.status ?? 'active') as KeyStatus} />
-                                          {hasMultiple && (
-                                            <span className="text-[9px] font-mono text-white/20 uppercase">
-                                              #{keyIdx + 1}
-                                            </span>
-                                          )}
-                                          {!key.is_active && (
-                                            <span className="text-[9px] font-mono text-white/20 uppercase border border-white/10 px-1.5 py-0.5 rounded-full">disabled</span>
-                                          )}
-                                        </div>
-                                        <p className="text-xs md:text-sm font-mono tracking-tight truncate text-white/70">
-                                          {revealedIds.has(key.id) ? key.key_value : maskKey(key.key_value)}
-                                        </p>
-                                        <div className="flex items-center gap-4 mt-2 flex-wrap">
-                                          <div className="flex items-center gap-1.5 text-[10px] text-white/30">
-                                            <Activity size={10} />
-                                            <span>{key.request_count.toLocaleString()} reqs</span>
-                                          </div>
-                                          <div className="flex items-center gap-1.5 text-[10px] text-white/30">
-                                            <TrendingUp size={10} />
-                                            <span>{successRate(key)} success</span>
-                                          </div>
-                                          <div className="flex items-center gap-1.5 text-[10px] text-white/30">
-                                            <Clock size={10} />
-                                            <span>{timeAgo(key.last_used_at)}</span>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
+                                ) : (
+                                  <span className="flex-1 text-xs font-mono text-white/60 truncate min-w-0">
+                                    {revealedIds.has(key.id) ? key.key_value : maskKey(key.key_value)}
+                                  </span>
+                                )}
 
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        onClick={() => toggleReveal(key.id)}
-                                        className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
-                                        title={revealedIds.has(key.id) ? 'Hide' : 'Reveal'}
-                                      >
-                                        {revealedIds.has(key.id) ? <EyeOff size={14} /> : <Eye size={14} />}
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <StatusBadge status={key.status} />
+
+                                  {editingId === key.id ? (
+                                    <>
+                                      <button onClick={saveEdit} disabled={saving}
+                                        className="p-1.5 rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-400 transition-all disabled:opacity-50">
+                                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                                       </button>
-                                      <button
-                                        onClick={() => startEdit(key)}
-                                        className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-all"
-                                        title="Edit value"
-                                      >
-                                        <Key size={14} />
+                                      <button onClick={() => setEditingId(null)}
+                                        className="p-1.5 rounded-lg hover:bg-white/10 text-white/30 hover:text-white transition-all">
+                                        <X size={12} />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button onClick={() => toggleReveal(key.id)}
+                                        className="p-1.5 rounded-lg hover:bg-white/10 text-white/20 hover:text-white transition-all">
+                                        {revealedIds.has(key.id) ? <EyeOff size={12} /> : <Eye size={12} />}
+                                      </button>
+                                      <button onClick={() => startEdit(key)}
+                                        className="p-1.5 rounded-lg hover:bg-white/10 text-white/20 hover:text-white transition-all">
+                                        <Pencil size={12} />
                                       </button>
                                       {key.status !== 'active' && (
-                                        <button
-                                          onClick={() => handleReset(key.id)}
-                                          disabled={resettingId === key.id}
-                                          className="p-2 rounded-lg hover:bg-white/5 text-yellow-400/60 hover:text-yellow-400 transition-all"
-                                          title="Reset status to active"
-                                        >
-                                          {resettingId === key.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                                        <button onClick={() => handleReset(key.id)} disabled={resettingId === key.id}
+                                          className="p-1.5 rounded-lg hover:bg-white/10 text-white/20 hover:text-white transition-all disabled:opacity-30">
+                                          {resettingId === key.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                                         </button>
                                       )}
-                                      <button
-                                        onClick={() => handleToggle(key)}
-                                        className={`p-2 rounded-lg hover:bg-white/5 transition-all ${key.is_active ? 'text-green-400/60 hover:text-green-400' : 'text-white/20 hover:text-white'}`}
-                                        title={key.is_active ? 'Disable key' : 'Enable key'}
-                                      >
-                                        {key.is_active ? <Check size={14} /> : <X size={14} />}
+                                      <button onClick={() => handleToggle(key)}
+                                        className={`p-1.5 rounded-lg transition-all text-xs font-mono ${key.is_active ? 'text-green-400/50 hover:text-yellow-400' : 'text-white/20 hover:text-green-400'}`}>
+                                        {key.is_active ? '●' : '○'}
                                       </button>
-                                      <button
-                                        onClick={() => handleDelete(key.id)}
-                                        disabled={deletingId === key.id}
-                                        className="p-2 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all"
-                                        title="Delete key"
-                                      >
-                                        {deletingId === key.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                      <button onClick={() => handleDelete(key.id)} disabled={deletingId === key.id}
+                                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all disabled:opacity-30">
+                                        {deletingId === key.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                                       </button>
-                                    </div>
-                                  </div>
+                                    </>
+                                  )}
                                 </div>
-                              )}
+                              </div>
+
+                              <div className="flex items-center gap-4 px-4 py-2 bg-white/[0.02] border-t border-white/5">
+                                {[
+                                  { icon: Activity, label: 'Requests', value: key.request_count.toLocaleString() },
+                                  { icon: TrendingUp, label: 'Success rate', value: successRate(key) },
+                                  { icon: Clock, label: 'Last used', value: timeAgo(key.last_used_at) },
+                                ].map(({ icon: Icon, label, value }) => (
+                                  <div key={label} className="flex items-center gap-1.5">
+                                    <Icon size={10} className="text-white/20" />
+                                    <span className="text-[10px] font-mono text-white/20">{label}:</span>
+                                    <span className="text-[10px] font-mono text-white/40">{value}</span>
+                                  </div>
+                                ))}
+                              </div>
                             </motion.div>
                           ))}
                         </div>

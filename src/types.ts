@@ -77,3 +77,35 @@ export interface ApiKey {
   error_count: number;
   last_used_at?: string;
 }
+
+export interface TelegramSettings {
+  id: string;
+  user_id: string;
+  api_id: string;
+  api_hash: string;
+  session_string: string;
+  target_chat: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AgentInstruction {
+  id: string;
+  user_id: string;
+  instruction: string;
+  created_at: string;
+}
+
+export interface TelegramDeliveryQueueItem {
+  id: string;
+  user_id: string;
+  post_id?: string;
+  video_url: string;
+  title?: string;
+  caption?: string;
+  hashtags?: string;
+  status: 'pending' | 'processing' | 'sent' | 'failed';
+  error_message?: string;
+  created_at: string;
+  sent_at?: string;
+}

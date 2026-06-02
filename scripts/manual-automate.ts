@@ -117,6 +117,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
 // ─── Cerebras Multi-Model Chat (rate-limit resilient) ─────────────────────────
 
 const CEREBRAS_MODELS = [
+  'qwen-3-32b',
   'llama3.3-70b',
   'llama3.1-70b',
   'llama3.1-8b',
@@ -1057,6 +1058,77 @@ async function proteusPostRenderCleanup(userId: string, currentVideoPath: string
   }
 }
 
+// ─── Telegram Agent Delivery ──────────────────────────────────────────────────
+
+async function deliverToTelegram(
+  videoPath: string,
+  title: string,
+  caption: string,
+  hashtags: string,
+  userId: string,
+  postId: string | null
+): Promise<boolean> {
+  const { data: tgSettings } = await supabase
+    .from('telegram_settings')
+    .select('api_id, api_hash, session_string, target_chat')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!tgSettings?.api_id || !tgSettings?.api_hash || !tgSettings?.session_string) {
+    console.warn('  ⚠ Telegram not configured — skipping delivery (add credentials in Settings)');
+    return false;
+  }
+
+  const { data: instructionRows } = await supabase
+    .from('agent_instructions')
+    .select('instruction')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+
+  const instructionsText = (instructionRows ?? []).map((i: any) => i.instruction).join('\n');
+  const targetChat = (tgSettings.target_chat || 'claw').replace(/^@/, '');
+
+  const escapeMd = (s: string) => (s || '').replace(/[_*[\]()~`>#+=|{}.!]/g, '\\$&');
+  const messageLines = [
+    `📹 *${escapeMd(title)}*`,
+    '',
+    caption ? `📝 ${caption}` : '',
+    hashtags || '',
+    instructionsText ? `\n📋 *Agent Instructions*\n${instructionsText}` : '',
+  ].filter(s => s !== '').join('\n').trim();
+
+  try {
+    const { TelegramClient } = await import('telegram') as any;
+    const { StringSession } = await import('telegram/sessions/index.js') as any;
+
+    const stringSession = new StringSession(tgSettings.session_string);
+    const client = new TelegramClient(
+      stringSession,
+      parseInt(tgSettings.api_id),
+      tgSettings.api_hash,
+      { connectionRetries: 3, useWSS: true }
+    );
+
+    await client.connect();
+    try {
+      await client.sendFile(targetChat, {
+        file: videoPath,
+        caption: messageLines,
+        parseMode: 'md',
+        forceDocument: false,
+        workers: 1,
+      });
+      console.log(`  ✅ Delivered to Telegram @${targetChat}`);
+      return true;
+    } finally {
+      await client.disconnect();
+    }
+  } catch (e: any) {
+    console.warn(`  ⚠ Telegram delivery failed: ${e.message?.slice(0, 120)}`);
+    return false;
+  }
+}
+
 // ─── Main Pipeline ─────────────────────────────────────────────────────────────
 
 async function runManualPipeline(job: any): Promise<void> {
@@ -1068,7 +1140,7 @@ async function runManualPipeline(job: any): Promise<void> {
     ? NICHES[Math.floor(Math.random() * NICHES.length)]
     : job.niche;
 
-  console.log(`\n▶ Manual Job ${job.id.slice(0, 8)} | niche: ${niche}`);
+  console.log(`\n▶ Manual Job ${job.id.slice(0, 8)} | niche: ${niche}  [steps 1/9 → 9/9]`);
 
   await supabase.from('manual_jobs').update({
     status: 'running',
@@ -1106,7 +1178,7 @@ async function runManualPipeline(job: any): Promise<void> {
 
   try {
     // 1. Pick unique topic
-    console.log('  1/8 Researching unique topic...');
+    console.log('  1/9 Researching unique topic...');
     const topic = await pickUniqueTopic(niche);
     console.log(`     → "${topic}"`);
 
@@ -1121,13 +1193,13 @@ async function runManualPipeline(job: any): Promise<void> {
     if (postId) await supabase.from('posts').update({ topic, niche }).eq('id', postId);
 
     // 2. Generate script
-    console.log('  2/8 Generating viral script with 5 scenes...');
+    console.log('  2/9 Generating viral script with 5 scenes...');
     const { title, script, scenes } = await generateScript(topic, niche);
     console.log(`     → "${title}" | ${scenes.length} scenes`);
     if (postId) await supabase.from('posts').update({ title, script }).eq('id', postId);
 
     // 3. Voiceover + caption/hashtags — run in parallel for speed
-    console.log('  3/8 Generating voiceover + timestamps + caption (parallel)...');
+    console.log('  3/9 Generating voiceover + timestamps + caption (parallel)...');
     const [voiceoverResult, captionResult] = await Promise.all([
       generateVoiceoverWithTimestamps(script),
       generateCaptionAndHashtags(topic, niche, title, script),
@@ -1143,7 +1215,7 @@ async function runManualPipeline(job: any): Promise<void> {
 
     // FIX: Sequential image generation — parallel calls simultaneously hit Cloudflare rate-limit,
       // causing all 5 scenes to fail at once. Music now downloads in parallel while images run one-by-one.
-      console.log(`  4/8 Generating ${scenes.length} scene images (sequential) + downloading music (parallel)...`);
+      console.log(`  4/9 Generating ${scenes.length} scene images (sequential) + downloading music (parallel)...`);
       const videoVariant = Math.floor((Date.now() / 1000) % 10000);
       const imageSlots: Array<string | null> = new Array(scenes.length).fill(null);
 
@@ -1175,10 +1247,10 @@ async function runManualPipeline(job: any): Promise<void> {
     }
     console.log(`     → ${imagePaths.length}/${scenes.length} scenes ready | Music: ${musicPath ? '✓' : '✗ (voiceover only)'}`);
 
-    console.log(`  5/8 Caption: "${caption.slice(0, 60)}..."`);
+    console.log(`  5/9 Caption: "${caption.slice(0, 60)}..."`);
 
     // 6. Remotion render
-    console.log('  6/8 Rendering video with Remotion...');
+    console.log('  6/9 Rendering video with Remotion...');
     const videoPath = join(tmpDir, 'final.mp4');
     await assembleVideoWithRemotion(imagePaths, audioPath, musicPath, videoPath, script, title, wordTimestamps);
     let _rawSize = readFileSync(videoPath).byteLength;
@@ -1198,7 +1270,7 @@ async function runManualPipeline(job: any): Promise<void> {
     } catch (_ce: any) { console.warn(`     ⚠ Compression skipped: ${_ce.message?.slice(0,60)}`); }
 
     // 7. Upload to Supabase Storage
-    console.log('  7/8 Uploading to Supabase Storage...');
+    console.log('  7/9 Uploading to Supabase Storage...');
     const timestamp = Date.now();
     const userId = job.user_id;
     const storagePath = `manual/${userId}/${timestamp}.mp4`;
@@ -1206,8 +1278,6 @@ async function runManualPipeline(job: any): Promise<void> {
     const videoUrl = await uploadFile(videoPath, storagePath, 'video/mp4');
     const thumbUrl = await uploadFile(imagePaths[0], thumbStoragePath, 'image/jpeg');
     console.log(`     → ${videoUrl}`);
-
-    const elapsed = Date.now() - startTime;
 
     if (postId) {
       await supabase.from('posts').update({
@@ -1218,6 +1288,20 @@ async function runManualPipeline(job: any): Promise<void> {
       }).eq('id', postId);
     }
 
+    // 8. Deliver to Telegram agent
+    console.log('  8/9 Delivering to Telegram agent...');
+    const telegramOk = await deliverToTelegram(videoPath, title, caption, hashtags, userId, postId);
+
+    if (telegramOk && postId) {
+      await supabase.from('posts').update({
+        status: 'published',
+        published_at: new Date().toISOString(),
+        publish_result: 'telegram:delivered',
+      }).eq('id', postId);
+    }
+
+    const elapsed = Date.now() - startTime;
+
     await supabase.from('manual_jobs').update({
       status: 'success',
       last_run_at: new Date().toISOString(),
@@ -1226,18 +1310,20 @@ async function runManualPipeline(job: any): Promise<void> {
       execution_time_ms: elapsed,
     }).eq('id', job.id);
 
-    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — stored: ${videoUrl}`);
+    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — ${telegramOk ? 'delivered to Telegram' : 'stored: ' + videoUrl}`);
 
     await sendNotification(
       userId,
-      'Video Ready',
-      `"${title}" has been generated successfully. Caption and hashtags are ready to copy.`,
+      telegramOk ? 'Video Delivered to Agent' : 'Video Ready',
+      telegramOk
+        ? `"${title}" has been delivered to your Telegram agent.`
+        : `"${title}" has been generated. Configure Telegram in Settings to auto-deliver.`,
       'success',
       postId ?? undefined,
     );
 
-    // 8. Run Proteus Cleanup Engine after successful render
-    console.log('  8/8 Running post-render cleanup...');
+    // 9. Run Proteus Cleanup Engine after successful render
+    console.log('  9/9 Running post-render cleanup...');
     await proteusPostRenderCleanup(userId, storagePath, thumbStoragePath);
 
   } catch (err: any) {

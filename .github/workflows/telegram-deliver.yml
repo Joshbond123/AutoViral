@@ -1,0 +1,45 @@
+name: Telegram Agent Delivery
+
+on:
+  repository_dispatch:
+    types: [telegram_deliver]
+  workflow_dispatch:
+    inputs:
+      queue_id:
+        description: 'telegram_delivery_queue item ID to deliver'
+        required: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install tsx globally
+        run: npm install -g tsx
+
+      - name: Deliver to Telegram
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          QUEUE_ID="${{ github.event.client_payload.queue_id }}${{ github.event.inputs.queue_id }}"
+          if [ -n "$QUEUE_ID" ]; then
+            echo "Delivering specific queue item: $QUEUE_ID"
+            npx tsx scripts/telegram-deliver.ts --queue-id "$QUEUE_ID"
+          else
+            echo "Processing all pending deliveries"
+            npx tsx scripts/telegram-deliver.ts
+          fi

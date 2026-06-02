@@ -117,6 +117,7 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
 // ─── Cerebras Multi-Model Chat (rate-limit resilient) ─────────────────────────
 
 const CEREBRAS_MODELS = [
+  'qwen-3-32b',
   'llama3.3-70b',
   'llama3.1-70b',
   'llama3.1-8b',
@@ -953,46 +954,75 @@ async function uploadFile(localPath: string, bucketPath: string, mime: string): 
   return data.publicUrl;
 }
 
-// ─── TikTok Publishing ────────────────────────────────────────────────────────
+// ─── Telegram Agent Delivery ──────────────────────────────────────────────────
 
-async function publishToTikTok(videoPath: string, accessToken: string): Promise<string> {
-  const videoData = readFileSync(videoPath);
-  const videoSize = videoData.byteLength;
+async function deliverToTelegram(
+  videoPath: string,
+  title: string,
+  caption: string,
+  hashtags: string,
+  userId: string,
+  postId: string | null
+): Promise<boolean> {
+  const { data: tgSettings } = await supabase
+    .from('telegram_settings')
+    .select('api_id, api_hash, session_string, target_chat')
+    .eq('user_id', userId)
+    .maybeSingle();
 
-  const initResp = await fetch('https://open.tiktokapis.com/v2/post/publish/inbox/video/init/', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-    },
-    body: JSON.stringify({
-      source_info: {
-        source: 'FILE_UPLOAD',
-        video_size: videoSize,
-        chunk_size: videoSize,
-        total_chunk_count: 1,
-      },
-    }),
-  });
-
-  const initJson = await initResp.json() as any;
-  if (!initResp.ok || !initJson?.data?.upload_url) {
-    throw new Error(`TikTok init failed: ${JSON.stringify(initJson)}`);
+  if (!tgSettings?.api_id || !tgSettings?.api_hash || !tgSettings?.session_string) {
+    console.warn('  ⚠ Telegram not configured — skipping delivery (add credentials in Settings)');
+    return false;
   }
 
-  const { upload_url, publish_id } = initJson.data;
-  const putResp = await fetch(upload_url, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'video/mp4',
-      'Content-Length': String(videoSize),
-      'Content-Range': `bytes 0-${videoSize - 1}/${videoSize}`,
-    },
-    body: videoData,
-  });
+  const { data: instructionRows } = await supabase
+    .from('agent_instructions')
+    .select('instruction')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
 
-  if (!putResp.ok) throw new Error(`TikTok upload PUT failed: ${putResp.status}`);
-  return publish_id as string;
+  const instructionsText = (instructionRows ?? []).map((i: any) => i.instruction).join('\n');
+  const targetChat = (tgSettings.target_chat || 'claw').replace(/^@/, '');
+
+  const escapeMd = (s: string) => (s || '').replace(/[_*[\]()~`>#+=|{}.!]/g, '\\$&');
+  const messageLines = [
+    `📹 *${escapeMd(title)}*`,
+    '',
+    caption ? `📝 ${caption}` : '',
+    hashtags || '',
+    instructionsText ? `\n📋 *Agent Instructions*\n${instructionsText}` : '',
+  ].filter(s => s !== '').join('\n').trim();
+
+  try {
+    const { TelegramClient } = await import('telegram') as any;
+    const { StringSession } = await import('telegram/sessions/index.js') as any;
+
+    const stringSession = new StringSession(tgSettings.session_string);
+    const client = new TelegramClient(
+      stringSession,
+      parseInt(tgSettings.api_id),
+      tgSettings.api_hash,
+      { connectionRetries: 3, useWSS: true }
+    );
+
+    await client.connect();
+    try {
+      await client.sendFile(targetChat, {
+        file: videoPath,
+        caption: messageLines,
+        parseMode: 'md',
+        forceDocument: false,
+        workers: 1,
+      });
+      console.log(`  ✅ Delivered to Telegram @${targetChat}`);
+      return true;
+    } finally {
+      await client.disconnect();
+    }
+  } catch (e: any) {
+    console.warn(`  ⚠ Telegram delivery failed: ${e.message?.slice(0, 120)}`);
+    return false;
+  }
 }
 
 // ─── Proteus Cleanup Engine — Post-Render Storage Pruning ─────────────────────
@@ -1239,37 +1269,17 @@ async function runPipeline(schedule: any): Promise<void> {
       }).eq('id', postId);
     }
 
-    // 8. Publish to TikTok
-    console.log('  8/8 Publishing to TikTok...');
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('access_token')
-      .eq('id', userId)
-      .maybeSingle();
-
-    let publishId: string | null = null;
-    let publishError: string | null = null;
-
-    if (profile?.access_token) {
-      try {
-        publishId = await publishToTikTok(videoPath, profile.access_token);
-        console.log(`     → publish_id: ${publishId}`);
-      } catch (e: any) {
-        publishError = e.message;
-        console.warn(`     ⚠ TikTok publish failed: ${e.message}`);
-      }
-    } else {
-      publishError = 'No TikTok access token found';
-      console.warn('     ⚠ No TikTok access token — video saved to storage only');
-    }
+    // 8. Deliver to Telegram agent
+    console.log('  8/8 Delivering to Telegram agent...');
+    const telegramOk = await deliverToTelegram(videoPath, title, caption, hashtags, userId, postId);
 
     const elapsed = Date.now() - startTime;
 
     if (postId) {
       await supabase.from('posts').update({
-        status: publishId ? 'published' : 'rendered',
-        publish_result: publishId ? `publish_id:${publishId}` : (publishError ?? null),
-        published_at: publishId ? new Date().toISOString() : null,
+        status: telegramOk ? 'published' : 'rendered',
+        publish_result: telegramOk ? `telegram:delivered` : 'no_telegram_config',
+        published_at: telegramOk ? new Date().toISOString() : null,
       }).eq('id', postId);
     }
 
@@ -1278,12 +1288,24 @@ async function runPipeline(schedule: any): Promise<void> {
       last_run_at: new Date().toISOString(),
       last_run_status: 'success',
       last_topic: topic,
-      last_error: publishError,
+      last_error: null,
       execution_time_ms: elapsed,
       scheduled_time: new Date(Date.now() + 86400000).toISOString(),
     }).eq('id', schedule.id);
 
-    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — ${publishId ? `published: ${publishId}` : 'stored: ' + videoUrl}`);
+    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — ${telegramOk ? 'delivered to Telegram' : 'stored: ' + videoUrl}`);
+
+    try {
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        title: telegramOk ? 'Video Delivered to Agent' : 'Video Generated',
+        message: telegramOk
+          ? `"${title}" has been delivered to your Telegram agent.`
+          : `"${title}" has been generated. Configure Telegram in Settings to auto-deliver.`,
+        type: 'success',
+        post_id: postId ?? null,
+      });
+    } catch { /* non-critical */ }
 
     // Run Proteus Cleanup Engine after successful render
     await proteusPostRenderCleanup(userId, storagePath, thumbPath);

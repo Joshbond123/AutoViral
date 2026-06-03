@@ -8,42 +8,6 @@ const FUNCS_BASE = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1` : '';
 
 export const HAS_BACKEND = Boolean(SUPABASE_URL);
 
-export async function fetchTikTokAuthUrl(): Promise<string> {
-  const url = FUNCS_BASE ? `${FUNCS_BASE}/tiktok-auth-url` : '/api/auth/tiktok/url';
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`auth url: ${res.status}`);
-  const json = await res.json();
-  return json.url;
-}
-
-export async function logoutTikTok(userId: string): Promise<void> {
-  if (!FUNCS_BASE) return;
-  try {
-    await fetch(`${FUNCS_BASE}/tiktok-logout`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
-    });
-  } catch { /* Non-fatal */ }
-}
-
-export interface TikTokProfile {
-  id: string;
-  username: string | null;
-  avatar_url: string | null;
-  expires_at: string | null;
-}
-
-export async function fetchProfile(userId: string): Promise<TikTokProfile | null> {
-  if (!supabase) throw new Error('Supabase not configured');
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url, expires_at')
-    .eq('id', userId)
-    .single();
-  if (error) throw new Error(error.message);
-  return data as TikTokProfile | null;
-}
 
 export async function fetchHistory(userId: string): Promise<Post[]> {
   if (!supabase) return [];

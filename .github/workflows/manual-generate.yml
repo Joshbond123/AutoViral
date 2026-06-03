@@ -1,65 +1,64 @@
 name: Manual Video Generate
 
-  on:
-    schedule:
-      - cron: '*/10 * * * *'
-    repository_dispatch:
-      types: [manual_generate]
-    workflow_dispatch:
-      inputs:
-        job_id:
-          description: 'Specific manual_job ID to process immediately'
-          required: false
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  repository_dispatch:
+    types: [manual_generate]
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Specific manual_job ID to process immediately'
+        required: false
 
-  jobs:
-    generate:
-      runs-on: ubuntu-latest
-      timeout-minutes: 58
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
-        - name: Setup Node.js
-          uses: actions/setup-node@v4
-          with:
-            node-version: '24'
-            cache: 'npm'
-        - name: Install dependencies
-          run: npm install --legacy-peer-deps
-        - name: Install tsx globally
-          run: npm install -g tsx
-        - name: Install system dependencies
-          run: |
-            sudo apt-get update -qq
-            sudo apt-get install -y \
-              libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
-              libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-              libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-              libpango-1.0-0 libcairo2 libasound2t64 \
-              fonts-liberation fonts-dejavu fontconfig \
-              imagemagick ffmpeg xvfb
-            fc-cache -f
-            convert --version | head -1
-            ffmpeg -version | head -1
-            echo "System deps ready"
-        - name: Run Manual Generation Pipeline
-          env:
-            SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-            SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-            CHROME_FLAGS: "--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage"
-            REMOTION_GL: swiftshader
-          run: |
-            export DISPLAY=:99
-            Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-            XVFB_PID=$!
-            sleep 2
-            echo "Xvfb started (PID: $XVFB_PID)"
-            JOB_ID="${{ github.event.client_payload.job_id }}${{ github.event.inputs.job_id }}"
-            if [ -n "$JOB_ID" ]; then
-              echo "Running specific job: $JOB_ID"
-              npx tsx scripts/manual-automate.ts --job-id "$JOB_ID"
-            else
-              echo "Running all pending jobs"
-              npx tsx scripts/manual-automate.ts
-            fi
-            kill $XVFB_PID 2>/dev/null || true
-  
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 58
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+      - name: Install tsx globally
+        run: npm install -g tsx
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+            libpango-1.0-0 libcairo2 libasound2t64 \
+            fonts-liberation fonts-dejavu fontconfig \
+            imagemagick ffmpeg xvfb
+          fc-cache -f
+          convert --version | head -1
+          ffmpeg -version | head -1
+          echo "System deps ready"
+      - name: Run Manual Generation Pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CHROME_FLAGS: "--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage"
+          REMOTION_GL: swiftshader
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          XVFB_PID=$!
+          sleep 2
+          echo "Xvfb started (PID: $XVFB_PID)"
+          JOB_ID="${{ github.event.client_payload.job_id }}${{ github.event.inputs.job_id }}"
+          if [ -n "$JOB_ID" ]; then
+            echo "Running specific job: $JOB_ID"
+            npx tsx scripts/manual-automate.ts --job-id "$JOB_ID"
+          else
+            echo "Running all pending jobs"
+            npx tsx scripts/manual-automate.ts
+          fi
+          kill $XVFB_PID 2>/dev/null || true

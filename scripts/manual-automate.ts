@@ -1354,9 +1354,9 @@ async function main(): Promise<void> {
   const missing = required.filter(s => !servicesPresent.has(s));
 
   if (missing.length > 0) {
-    console.error(`❌ Missing API keys in Supabase: ${missing.join(', ')}`);
-    console.error('   → Add them via the Settings page in the AutoViral dashboard.');
-    process.exit(1);
+    console.warn(`⚠ API keys not yet configured for: ${missing.join(', ')} — skipping this run.`);
+    console.warn('   → Add your API keys via the Settings page in the AutoViral dashboard.');
+    process.exit(0); // Graceful exit: no API keys configured yet
   }
 
   const hasCF = servicesPresent.has('cloudflare') && servicesPresent.has('cloudflare_id');

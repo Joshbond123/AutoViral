@@ -3,13 +3,11 @@ import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2, 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Post } from '../types';
-import { fetchHistory, fetchProfile, TikTokProfile, fetchScheduledCount, subscribeToPosts } from '../lib/api';
+import { fetchHistory, fetchScheduledCount, subscribeToPosts } from '../lib/api';
 
 export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([]);
-  const [profile, setProfile] = useState<TikTokProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profileError, setProfileError] = useState<string | null>(null);
   const [scheduledCount, setScheduledCount] = useState<number>(0);
   const navigate = useNavigate();
 
@@ -33,11 +31,6 @@ export default function Dashboard() {
         setPosts(Array.isArray(historyRes.value) ? (historyRes.value as Post[]) : []);
       }
 
-      if (profileRes.status === 'fulfilled') {
-        setProfile(profileRes.value);
-      } else {
-        setProfileError(String((profileRes.reason as Error)?.message ?? profileRes.reason));
-      }
 
       if (schedCountRes.status === 'fulfilled') {
         setScheduledCount(schedCountRes.value);
@@ -61,7 +54,9 @@ export default function Dashboard() {
     };
   }, []);
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    const { supabaseAuth } = await import('../lib/supabase');
+    if (supabaseAuth) await supabaseAuth.auth.signOut();
     localStorage.removeItem('tiktok_user_id');
     navigate('/');
   };
@@ -83,55 +78,43 @@ export default function Dashboard() {
       {/* Header */}
       <div>
         <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Welcome back, Creator</h1>
-        <p className="text-white/40 text-sm md:text-base">Your TikTok automation pipeline is active.</p>
+        <p className="text-white/40 text-sm md:text-base">Your AI video automation pipeline is active.</p>
       </div>
 
-      {/* Connected TikTok account */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="glass rounded-2xl md:rounded-[32px] p-5 md:p-8 border border-brand-primary/20 bg-brand-primary/[0.03]"
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-6">
-          <div className="flex items-center gap-4 md:gap-5">
-            <div className="relative shrink-0">
-              {profile?.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt={profile.username ?? 'TikTok user'}
-                  className="w-14 h-14 md:w-16 md:h-16 rounded-full object-cover border-2 border-brand-primary/40"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/30">
-                  <Video size={24} />
+      {/* Pipeline Status */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass rounded-2xl md:rounded-[32px] p-5 md:p-8 border border-brand-primary/20 bg-brand-primary/[0.03]"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-6">
+            <div className="flex items-center gap-4 md:gap-5">
+              <div className="relative shrink-0">
+                <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-center">
+                  <Video size={24} className="text-brand-primary" />
                 </div>
-              )}
-              <div className="absolute -bottom-1 -right-1 w-4 h-4 md:w-5 md:h-5 rounded-full bg-green-500 border-2 border-[#0a0a0a]" />
+                <div className="absolute -bottom-1 -right-1 w-4 h-4 md:w-5 md:h-5 rounded-full bg-green-500 border-2 border-[#0a0a0a]" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.25em] font-mono text-brand-primary mb-1">
+                  Automation Status
+                </p>
+                <h2 className="text-xl md:text-2xl font-bold tracking-tight truncate">
+                  Pipeline Active
+                </h2>
+                <p className="text-white/40 text-xs font-mono mt-1">
+                  AI pipeline runs every 10 minutes via GitHub Actions
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-[0.25em] font-mono text-brand-primary mb-1">
-                Connected TikTok account
-              </p>
-              <h2 className="text-xl md:text-2xl font-bold tracking-tight truncate">
-                {loading ? 'Loading…' : profile?.username || 'TikTok creator'}
-              </h2>
-              <p className="text-white/40 text-xs font-mono mt-1">
-                {profile?.id ? `ID: ${profile.id.slice(0, 12)}…` : '—'}
-              </p>
-              {profileError && (
-                <p className="text-red-400 text-xs mt-1 truncate">Error: {profileError}</p>
-              )}
-            </div>
+            <button
+              onClick={handleSignOut}
+              className="self-start sm:self-auto flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-all"
+            >
+              <LogOut size={12} /> Sign out
+            </button>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="self-start sm:self-auto flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-all"
-          >
-            <LogOut size={12} /> Sign out
-          </button>
-        </div>
-      </motion.div>
+        </motion.div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">

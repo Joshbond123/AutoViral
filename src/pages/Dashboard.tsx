@@ -20,9 +20,8 @@ export default function Dashboard() {
 
     let cancelled = false;
     (async () => {
-      const [historyRes, profileRes, schedCountRes] = await Promise.allSettled([
+      const [historyRes, schedCountRes] = await Promise.allSettled([
         fetchHistory(userId),
-        fetchProfile(userId),
         fetchScheduledCount(userId),
       ]);
       if (cancelled) return;
@@ -30,7 +29,6 @@ export default function Dashboard() {
       if (historyRes.status === 'fulfilled') {
         setPosts(Array.isArray(historyRes.value) ? (historyRes.value as Post[]) : []);
       }
-
 
       if (schedCountRes.status === 'fulfilled') {
         setScheduledCount(schedCountRes.value);

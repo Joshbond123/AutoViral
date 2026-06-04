@@ -78,15 +78,35 @@ export interface ApiKey {
   last_used_at?: string;
 }
 
-export interface TelegramSettings {
+export interface FacebookSettings {
   id: string;
   user_id: string;
-  api_id: string;
-  api_hash: string;
-  session_string: string;
-  target_chat: string;
+  page_access_token: string;
+  page_id?: string;
+  page_name?: string;
+  page_category?: string;
+  is_active: boolean;
+  status: 'active' | 'failed' | 'expired';
+  last_tested_at?: string;
+  last_published_at?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface FacebookDeliveryQueueItem {
+  id: string;
+  user_id: string;
+  post_id?: string;
+  facebook_setting_id?: string;
+  video_url: string;
+  title?: string;
+  caption?: string;
+  hashtags?: string;
+  status: 'pending' | 'processing' | 'published' | 'failed';
+  error_message?: string;
+  fb_post_id?: string;
+  created_at: string;
+  published_at?: string;
 }
 
 export interface AgentInstruction {
@@ -94,18 +114,4 @@ export interface AgentInstruction {
   user_id: string;
   instruction: string;
   created_at: string;
-}
-
-export interface TelegramDeliveryQueueItem {
-  id: string;
-  user_id: string;
-  post_id?: string;
-  video_url: string;
-  title?: string;
-  caption?: string;
-  hashtags?: string;
-  status: 'pending' | 'processing' | 'sent' | 'failed';
-  error_message?: string;
-  created_at: string;
-  sent_at?: string;
 }

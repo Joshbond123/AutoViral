@@ -1058,73 +1058,70 @@ async function proteusPostRenderCleanup(userId: string, currentVideoPath: string
   }
 }
 
-// ─── Telegram Agent Delivery ──────────────────────────────────────────────────
+// ─── Facebook Page Publishing ──────────────────────────────────────────────────
 
-async function deliverToTelegram(
-  videoPath: string,
+async function publishToFacebook(
+  videoUrl: string,
   title: string,
   caption: string,
   hashtags: string,
   userId: string,
   postId: string | null
 ): Promise<boolean> {
-  const { data: tgSettings } = await supabase
-    .from('telegram_settings')
-    .select('api_id, api_hash, session_string, target_chat')
+  const { data: fbSettings } = await supabase
+    .from('facebook_settings')
+    .select('id, page_access_token, page_id, page_name')
     .eq('user_id', userId)
+    .eq('is_active', true)
+    .neq('status', 'failed')
+    .order('created_at', { ascending: true })
+    .limit(1)
     .maybeSingle();
 
-  if (!tgSettings?.api_id || !tgSettings?.api_hash || !tgSettings?.session_string) {
-    console.warn('  ⚠ Telegram not configured — skipping delivery (add credentials in Settings)');
+  if (!fbSettings?.page_access_token) {
+    console.warn('  ⚠ Facebook not configured — skipping publish (add a Page Access Token in Settings)');
     return false;
   }
 
-  const { data: instructionRows } = await supabase
-    .from('agent_instructions')
-    .select('instruction')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-
-  const instructionsText = (instructionRows ?? []).map((i: any) => i.instruction).join('\n');
-  const targetChat = (tgSettings.target_chat || 'claw').replace(/^@/, '');
-
-  const escapeMd = (s: string) => (s || '').replace(/[_*[\]()~`>#+=|{}.!]/g, '\\$&');
-  const messageLines = [
-    `📹 *${escapeMd(title)}*`,
-    '',
-    caption ? `📝 ${caption}` : '',
-    hashtags || '',
-    instructionsText ? `\n📋 *Agent Instructions*\n${instructionsText}` : '',
-  ].filter(s => s !== '').join('\n').trim();
+  const token = fbSettings.page_access_token;
+  const pageId = fbSettings.page_id || 'me';
+  const description = [caption, hashtags].filter(Boolean).join('\n');
 
   try {
-    const { TelegramClient } = await import('telegram') as any;
-    const { StringSession } = await import('telegram/sessions/index.js') as any;
-
-    const stringSession = new StringSession(tgSettings.session_string);
-    const client = new TelegramClient(
-      stringSession,
-      parseInt(tgSettings.api_id),
-      tgSettings.api_hash,
-      { connectionRetries: 3, useWSS: true }
+    const resp = await fetch(
+      `https://graph-video.facebook.com/v20.0/${pageId}/videos`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_token: token,
+          file_url: videoUrl,
+          description: description || undefined,
+          title: title || undefined,
+        }),
+      }
     );
 
-    await client.connect();
-    try {
-      await client.sendFile(targetChat, {
-        file: videoPath,
-        caption: messageLines,
-        parseMode: 'md',
-        forceDocument: false,
-        workers: 1,
-      });
-      console.log(`  ✅ Delivered to Telegram @${targetChat}`);
-      return true;
-    } finally {
-      await client.disconnect();
+    if (!resp.ok) {
+      const errText = await resp.text();
+      let errMsg = `Facebook API ${resp.status}`;
+      try { const ej = JSON.parse(errText); errMsg = ej?.error?.message ?? errMsg; } catch { errMsg = errText.slice(0, 200) || errMsg; }
+      throw new Error(errMsg);
     }
+
+    const json: any = await resp.json();
+    const fbPostId = json?.id ?? '';
+    console.log(`  ✅ Published to Facebook${fbSettings.page_name ? ` (${fbSettings.page_name})` : ''}: post ${fbPostId}`);
+
+    await supabase.from('facebook_settings').update({
+      status: 'active',
+      last_published_at: new Date().toISOString(),
+    }).eq('id', fbSettings.id);
+
+    return true;
   } catch (e: any) {
-    console.warn(`  ⚠ Telegram delivery failed: ${e.message?.slice(0, 120)}`);
+    console.warn(`  ⚠ Facebook publish failed: ${e.message?.slice(0, 120)}`);
+    await supabase.from('facebook_settings').update({ status: 'failed' }).eq('id', fbSettings.id);
     return false;
   }
 }
@@ -1288,15 +1285,15 @@ async function runManualPipeline(job: any): Promise<void> {
       }).eq('id', postId);
     }
 
-    // 8. Deliver to Telegram agent
-    console.log('  8/9 Delivering to Telegram agent...');
-    const telegramOk = await deliverToTelegram(videoPath, title, caption, hashtags, userId, postId);
+    // 8. Publish to Facebook Page
+    console.log('  8/9 Publishing to Facebook Page...');
+    const facebookOk = await publishToFacebook(videoUrl, title, caption, hashtags, userId, postId);
 
-    if (telegramOk && postId) {
+    if (postId) {
       await supabase.from('posts').update({
-        status: 'published',
-        published_at: new Date().toISOString(),
-        publish_result: 'telegram:delivered',
+        status: facebookOk ? 'published' : 'rendered',
+        published_at: facebookOk ? new Date().toISOString() : null,
+        publish_result: facebookOk ? 'facebook:published' : 'no_facebook_config',
       }).eq('id', postId);
     }
 
@@ -1310,14 +1307,14 @@ async function runManualPipeline(job: any): Promise<void> {
       execution_time_ms: elapsed,
     }).eq('id', job.id);
 
-    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — ${telegramOk ? 'delivered to Telegram' : 'stored: ' + videoUrl}`);
+    console.log(`  ✅ Done in ${(elapsed / 1000).toFixed(1)}s — ${facebookOk ? 'published to Facebook' : 'stored: ' + videoUrl}`);
 
     await sendNotification(
       userId,
-      telegramOk ? 'Video Delivered to Agent' : 'Video Ready',
-      telegramOk
-        ? `"${title}" has been delivered to your Telegram agent.`
-        : `"${title}" has been generated. Configure Telegram in Settings to auto-deliver.`,
+      facebookOk ? 'Published to Facebook' : 'Video Ready',
+      facebookOk
+        ? `"${title}" has been published to your Facebook Page.`
+        : `"${title}" has been generated. Configure Facebook in Settings to auto-publish.`,
       'success',
       postId ?? undefined,
     );

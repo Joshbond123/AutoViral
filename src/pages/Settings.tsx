@@ -4,13 +4,14 @@ import {
   Key, Trash2, Plus, Eye, EyeOff, Check, X,
   AlertCircle, Database, Loader2, RefreshCw,
   Activity, Clock, TrendingUp, Shield, Image,
-  Send, Bot, MessageSquare, ListChecks, Pencil, ExternalLink, Info,
+  Globe, MessageSquare, ListChecks, Pencil, Info,
 } from 'lucide-react';
-import { ApiKey, TelegramSettings, AgentInstruction } from '../types';
+import { ApiKey, FacebookSettings, AgentInstruction } from '../types';
 import {
   fetchApiKeys, addApiKey, deleteApiKey, toggleApiKey,
   updateApiKeyValue, resetKeyStatus, subscribeToApiKeys,
-  fetchTelegramSettings, saveTelegramSettings, deleteTelegramSettings,
+  fetchFacebookSettings, addFacebookSetting, deleteFacebookSetting,
+  updateFacebookSetting, testFacebookToken,
   fetchAgentInstructions, addAgentInstruction, deleteAgentInstruction, updateAgentInstruction,
 } from '../lib/api';
 import { HAS_SUPABASE } from '../lib/supabase';
@@ -108,7 +109,7 @@ export default function Settings() {
     <div className="max-w-3xl">
       <div className="mb-8 md:mb-12">
         <h1 className="text-2xl md:text-4xl font-bold tracking-tight mb-2">Platform Settings</h1>
-        <p className="text-white/40 text-sm md:text-base">Manage API credentials, Telegram integration, and agent delivery instructions.</p>
+        <p className="text-white/40 text-sm md:text-base">Manage API credentials, Facebook integration, and auto-publishing settings.</p>
       </div>
 
       <div className="space-y-6 md:space-y-8">
@@ -127,7 +128,7 @@ export default function Settings() {
         <RotationBanner />
         <FallbackBanner />
         <ApiKeyManager />
-        {userId && <TelegramManager userId={userId} />}
+        {userId && <FacebookManager userId={userId} />}
         {userId && <AgentInstructionsManager userId={userId} />}
       </div>
     </div>
@@ -217,72 +218,100 @@ function FallbackBanner() {
   );
 }
 
-// ─── Telegram Integration Manager ─────────────────────────────────────────────
+// ─── Facebook Integration Manager ─────────────────────────────────────────────
 
-function TelegramManager({ userId }: { userId: string }) {
+function FacebookManager({ userId }: { userId: string }) {
+  const [settings, setSettings] = useState<FacebookSettings[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [newToken, setNewToken] = useState('');
+  const [showNewTokenInput, setShowNewTokenInput] = useState(false);
+  const [showNewTokenText, setShowNewTokenText] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editToken, setEditToken] = useState('');
+  const [showEditToken, setShowEditToken] = useState<Record<string, boolean>>({});
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const [apiId, setApiId] = useState('');
-  const [apiHash, setApiHash] = useState('');
-  const [sessionString, setSessionString] = useState('');
-  const [targetChat, setTargetChat] = useState('claw');
-  const [showSession, setShowSession] = useState(false);
-  const [hasExisting, setHasExisting] = useState(false);
-
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!HAS_SUPABASE) { setLoading(false); return; }
-    (async () => {
-      try {
-        const data = await fetchTelegramSettings(userId);
-        if (data) {
-          setApiId(data.api_id || '');
-          setApiHash(data.api_hash || '');
-          setSessionString(data.session_string || '');
-          setTargetChat(data.target_chat || 'claw');
-          setHasExisting(true);
-        }
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    try {
+      const data = await fetchFacebookSettings(userId);
+      setSettings(data);
+    } catch (e: any) {
+      setAddError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }, [userId]);
 
-  const handleSave = async () => {
-    if (!apiId.trim() || !apiHash.trim() || !sessionString.trim()) {
-      setError('API ID, API Hash, and Session String are all required.');
-      return;
-    }
-    setSaving(true);
-    setError(null);
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!newToken.trim()) { setAddError('Page Access Token is required.'); return; }
+    setAdding(true);
+    setAddError(null);
     try {
-      await saveTelegramSettings(userId, { api_id: apiId, api_hash: apiHash, session_string: sessionString, target_chat: targetChat });
-      setHasExisting(true);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      const created = await addFacebookSetting(userId, newToken);
+      setSettings(prev => [...prev, created]);
+      setNewToken('');
+      setShowNewTokenInput(false);
     } catch (e: any) {
-      setError(e.message);
+      setAddError(e.message);
     } finally {
-      setSaving(false);
+      setAdding(false);
     }
   };
 
-  const handleClear = async () => {
-    if (!confirm('Remove Telegram credentials? The pipeline will no longer auto-deliver videos.')) return;
-    setClearing(true);
+  const handleDelete = async (id: string) => {
+    if (!confirm('Remove this Facebook Page token?')) return;
+    setDeletingId(id);
     try {
-      await deleteTelegramSettings(userId);
-      setApiId(''); setApiHash(''); setSessionString(''); setTargetChat('claw');
-      setHasExisting(false);
+      await deleteFacebookSetting(id);
+      setSettings(prev => prev.filter(s => s.id !== id));
     } catch (e: any) {
-      setError(e.message);
+      setAddError(e.message);
     } finally {
-      setClearing(false);
+      setDeletingId(null);
+    }
+  };
+
+  const handleTest = async (id: string) => {
+    setTestingId(id);
+    setTestResults(prev => ({ ...prev, [id]: { ok: false, msg: 'Testing…' } }));
+    try {
+      const result = await testFacebookToken(id);
+      setTestResults(prev => ({
+        ...prev,
+        [id]: { ok: result.ok, msg: result.ok ? `✓ Valid — ${result.pageName}` : `✗ ${result.error ?? 'Invalid token'}` },
+      }));
+      if (result.ok) {
+        setSettings(prev => prev.map(s => s.id === id ? { ...s, status: 'active', page_name: result.pageName ?? s.page_name } : s));
+      } else {
+        setSettings(prev => prev.map(s => s.id === id ? { ...s, status: 'failed' } : s));
+      }
+    } catch (e: any) {
+      setTestResults(prev => ({ ...prev, [id]: { ok: false, msg: `✗ ${e.message}` } }));
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    if (!editToken.trim()) { setEditingId(null); return; }
+    setSavingEditId(id);
+    try {
+      await updateFacebookSetting(id, editToken);
+      setSettings(prev => prev.map(s => s.id === id ? { ...s, page_access_token: editToken, status: 'active' } : s));
+      setEditingId(null);
+      setEditToken('');
+    } catch (e: any) {
+      setAddError(e.message);
+    } finally {
+      setSavingEditId(null);
     }
   };
 
@@ -291,133 +320,230 @@ function TelegramManager({ userId }: { userId: string }) {
       <div className="px-5 md:px-8 py-4 md:py-5 border-b border-white/5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
-              <Bot size={18} />
+            <div className="w-9 h-9 rounded-xl bg-blue-600/10 flex items-center justify-center text-blue-500 shrink-0">
+              <Globe size={18} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm md:text-base">Telegram Integration</h3>
-                {hasExisting && (
+                <h3 className="font-bold text-sm md:text-base">Facebook Integration</h3>
+                {settings.some(s => s.is_active && s.status === 'active') && (
                   <span className="text-[9px] font-mono uppercase tracking-widest text-green-400/80 border border-green-500/20 px-2 py-0.5 rounded-full bg-green-500/5">
                     Connected
                   </span>
                 )}
               </div>
-              <p className="text-xs text-white/40 mt-0.5">Auto-deliver generated videos to your Telegram agent at t.me/claw</p>
+              <p className="text-xs text-white/40 mt-0.5">Auto-publish generated videos to your Facebook Page</p>
             </div>
           </div>
+          <button
+            onClick={() => { setShowNewTokenInput(v => !v); setAddError(null); setNewToken(''); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-primary/10 hover:bg-brand-primary/20 text-brand-primary text-xs font-bold transition-all"
+          >
+            {showNewTokenInput ? <X size={13} /> : <Plus size={13} />}
+            {showNewTokenInput ? 'Cancel' : 'Add Page'}
+          </button>
         </div>
       </div>
 
-      <div className="p-5 md:p-8 space-y-6">
+      <div className="p-5 md:p-8 space-y-5">
+        {/* Info banner */}
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-blue-600/5 border border-blue-500/15">
+          <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-white/50 leading-relaxed space-y-1">
+            <p><strong className="text-blue-400">How to get a Page Access Token:</strong></p>
+            <p>1. Go to <a href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener" className="text-blue-400 underline underline-offset-2">Meta Graph API Explorer</a> → select your app.</p>
+            <p>2. Click <strong>Generate Access Token</strong> → select your Page from the dropdown.</p>
+            <p>3. Request: <code className="bg-white/10 px-1 rounded font-mono text-[10px]">pages_manage_posts</code> + <code className="bg-white/10 px-1 rounded font-mono text-[10px]">pages_read_engagement</code>.</p>
+            <p>4. For a long-lived token, use the <a href="https://developers.facebook.com/docs/facebook-login/access-tokens/refreshing" target="_blank" rel="noopener" className="text-blue-400 underline underline-offset-2">token exchange endpoint</a>.</p>
+          </div>
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-6 text-white/20 text-sm">
             <Loader2 size={16} className="animate-spin" /> Loading…
           </div>
         ) : (
           <>
-            <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-blue-500/5 border border-blue-500/15">
-              <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
-              <div className="text-xs text-white/50 leading-relaxed space-y-1.5">
-                <p><strong className="text-blue-400">How to get credentials:</strong></p>
-                <p>1. Visit <a href="https://my.telegram.org" target="_blank" rel="noopener" className="text-blue-400 underline underline-offset-2">my.telegram.org</a> → API development tools → create an app to get your <strong>API ID</strong> and <strong>API Hash</strong>.</p>
-                <p>2. Generate a <strong>Session String</strong> by running: <code className="bg-white/10 px-1 rounded font-mono text-[10px]">npx tsx scripts/gen-session.ts</code> locally after cloning the repo, or use any Telethon/GramJS session generator.</p>
-                <p>3. The <strong>Target Chat</strong> is the Telegram username to send to (without @). Default: <code className="bg-white/10 px-1 rounded font-mono text-[10px]">claw</code></p>
-              </div>
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">API ID</label>
-                <input
-                  type="text"
-                  value={apiId}
-                  onChange={e => setApiId(e.target.value)}
-                  placeholder="12345678"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono transition-all"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">API Hash</label>
-                <input
-                  type="password"
-                  value={apiHash}
-                  onChange={e => setApiHash(e.target.value)}
-                  placeholder="a1b2c3d4e5f6g7h8i9j0…"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">Session String</label>
-                <button
-                  onClick={() => setShowSession(v => !v)}
-                  className="text-[10px] text-white/30 hover:text-white transition-all flex items-center gap-1"
+            {/* Add token form */}
+            <AnimatePresence>
+              {showNewTokenInput && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
                 >
-                  {showSession ? <EyeOff size={10} /> : <Eye size={10} />}
-                  {showSession ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              <textarea
-                value={sessionString}
-                onChange={e => setSessionString(e.target.value)}
-                placeholder="1BQANOTEuMTg1LjE0MC4xMjcBu5aUh4X…  (paste your full GramJS/Telethon session string)"
-                rows={showSession ? 4 : 2}
-                className={`w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:outline-none focus:border-blue-500/50 font-mono transition-all resize-none ${!showSession ? 'text-white/20' : ''}`}
-                style={!showSession ? { WebkitTextSecurity: 'disc' } as any : {}}
-              />
-            </div>
+                  <div className="flex flex-col gap-3 p-4 rounded-xl bg-white/[0.03] border border-white/5">
+                    <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">
+                      Facebook Page Access Token
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 relative">
+                        <input
+                          type={showNewTokenText ? 'text' : 'password'}
+                          value={newToken}
+                          onChange={e => setNewToken(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setShowNewTokenInput(false); setNewToken(''); } }}
+                          placeholder="EAAxxxxxxxxxxxxx..."
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-4 pr-10 text-xs focus:outline-none focus:border-blue-500/50 font-mono transition-all"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewTokenText(v => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-all"
+                        >
+                          {showNewTokenText ? <EyeOff size={12} /> : <Eye size={12} />}
+                        </button>
+                      </div>
+                      <button
+                        onClick={handleAdd}
+                        disabled={adding}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold transition-all hover:bg-brand-primary/90 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {adding ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                        {adding ? 'Verifying…' : 'Add Page'}
+                      </button>
+                    </div>
+                    {addError && (
+                      <p className="flex items-center gap-1.5 text-red-400 text-xs">
+                        <AlertCircle size={11} /> {addError}
+                      </p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-            <div className="space-y-1.5">
-              <label className="text-[10px] uppercase font-mono tracking-widest text-white/40">Target Chat Username</label>
-              <div className="flex items-center gap-2">
-                <span className="text-white/30 font-mono text-sm">@</span>
-                <input
-                  type="text"
-                  value={targetChat}
-                  onChange={e => setTargetChat(e.target.value.replace(/^@/, ''))}
-                  placeholder="claw"
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono transition-all"
-                />
-                <a
-                  href={`https://t.me/${targetChat || 'claw'}`}
-                  target="_blank"
-                  rel="noopener"
-                  className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/30 hover:text-white transition-all"
-                >
-                  <ExternalLink size={14} />
-                </a>
+            {settings.length === 0 && !showNewTokenInput ? (
+              <div className="py-10 text-center border border-dashed border-white/5 rounded-2xl">
+                <Globe className="mx-auto text-white/10 mb-3" size={32} />
+                <p className="text-white/20 text-xs uppercase font-mono tracking-widest">No pages connected</p>
+                <p className="text-white/20 text-xs mt-1 px-4">Add a Facebook Page Access Token to enable auto-publishing.</p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-2">
+                {settings.map(s => (
+                  <motion.div
+                    key={s.id}
+                    layout
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-xl border border-white/5 overflow-hidden"
+                  >
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        s.status === 'active' ? 'bg-blue-600/10 text-blue-400' : 'bg-red-500/10 text-red-400'
+                      }`}>
+                        <Globe size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold truncate">
+                            {s.page_name || 'Unknown Page'}
+                          </span>
+                          {s.page_id && (
+                            <span className="text-[9px] font-mono text-white/25">ID: {s.page_id}</span>
+                          )}
+                          <span className={`text-[9px] px-2 py-0.5 rounded-full border font-mono uppercase tracking-widest ${
+                            s.status === 'active'
+                              ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+                          }`}>
+                            {s.status}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-white/20 font-mono mt-0.5 truncate">
+                          {s.page_access_token.slice(0, 24)}…
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleTest(s.id)}
+                          disabled={testingId === s.id}
+                          title="Test token validity"
+                          className="p-1.5 rounded-lg hover:bg-white/10 text-white/20 hover:text-brand-secondary transition-all disabled:opacity-30"
+                        >
+                          {testingId === s.id ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (editingId === s.id) { setEditingId(null); setEditToken(''); }
+                            else { setEditingId(s.id); setEditToken(''); }
+                          }}
+                          className={`p-1.5 rounded-lg transition-all ${editingId === s.id ? 'text-white/40 bg-white/5' : 'text-white/20 hover:text-white hover:bg-white/10'}`}
+                        >
+                          {editingId === s.id ? <X size={12} /> : <Pencil size={12} />}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(s.id)}
+                          disabled={deletingId === s.id}
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all disabled:opacity-30"
+                        >
+                          {deletingId === s.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        </button>
+                      </div>
+                    </div>
 
-            {error && (
-              <p className="flex items-center gap-2 text-red-400 text-xs px-1">
-                <AlertCircle size={13} /> {error}
-              </p>
+                    {/* Test result */}
+                    {testResults[s.id] && (
+                      <div className={`px-4 py-2 text-[11px] font-mono border-t border-white/5 ${
+                        testResults[s.id].ok ? 'text-green-400 bg-green-500/5' : 'text-red-400 bg-red-500/5'
+                      }`}>
+                        {testResults[s.id].msg}
+                      </div>
+                    )}
+
+                    {/* Edit token form */}
+                    <AnimatePresence>
+                      {editingId === s.id && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="overflow-hidden border-t border-white/5 bg-white/[0.02]"
+                        >
+                          <div className="flex items-center gap-2 p-4">
+                            <div className="flex-1 relative">
+                              <input
+                                type={showEditToken[s.id] ? 'text' : 'password'}
+                                value={editToken}
+                                onChange={e => setEditToken(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(s.id); if (e.key === 'Escape') { setEditingId(null); setEditToken(''); } }}
+                                placeholder="Paste new Page Access Token…"
+                                className="w-full bg-white/5 border border-white/10 rounded-xl py-2 pl-4 pr-10 text-xs focus:outline-none focus:border-brand-primary/50 font-mono transition-all"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowEditToken(prev => ({ ...prev, [s.id]: !prev[s.id] }))}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-all"
+                              >
+                                {showEditToken[s.id] ? <EyeOff size={11} /> : <Eye size={11} />}
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => handleSaveEdit(s.id)}
+                              disabled={savingEditId === s.id || !editToken.trim()}
+                              className="flex items-center gap-1 px-3 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold disabled:opacity-50 transition-all"
+                            >
+                              {savingEditId === s.id ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                              Save
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                ))}
+              </div>
             )}
 
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : <Send size={14} />}
-                {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Telegram Settings'}
-              </button>
-              {hasExisting && (
-                <button
-                  onClick={handleClear}
-                  disabled={clearing}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-red-500/10 text-white/40 hover:text-red-400 border border-white/5 text-sm font-medium transition-all disabled:opacity-40"
-                >
-                  {clearing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  Clear
-                </button>
-              )}
-            </div>
+            {addError && !showNewTokenInput && (
+              <p className="flex items-center gap-1.5 text-red-400 text-xs px-1">
+                <AlertCircle size={11} /> {addError}
+              </p>
+            )}
           </>
         )}
       </div>
@@ -508,7 +634,7 @@ function AgentInstructionsManager({ userId }: { userId: string }) {
           </div>
           <div>
             <h3 className="font-bold text-sm md:text-base">Agent Instructions</h3>
-            <p className="text-xs text-white/40 mt-0.5">Instructions sent with every video delivered to your Telegram agent.</p>
+            <p className="text-xs text-white/40 mt-0.5">Custom instructions appended to the video description on every Facebook publish.</p>
           </div>
           <span className="ml-auto text-[10px] font-mono uppercase tracking-widest text-white/20">
             {instructions.length} instruction{instructions.length !== 1 ? 's' : ''}

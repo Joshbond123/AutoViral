@@ -1,16 +1,16 @@
-name: Telegram Agent Delivery
+name: Facebook Page Publisher
 
 on:
   repository_dispatch:
-    types: [telegram_deliver]
+    types: [facebook_publish]
   workflow_dispatch:
     inputs:
       queue_id:
-        description: 'telegram_delivery_queue item ID to deliver'
+        description: 'facebook_delivery_queue item ID to publish (leave blank for all pending)'
         required: false
 
 jobs:
-  deliver:
+  publish:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -21,7 +21,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -30,16 +30,16 @@ jobs:
       - name: Install tsx globally
         run: npm install -g tsx
 
-      - name: Deliver to Telegram
+      - name: Publish to Facebook
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           QUEUE_ID="${{ github.event.client_payload.queue_id }}${{ github.event.inputs.queue_id }}"
           if [ -n "$QUEUE_ID" ]; then
-            echo "Delivering specific queue item: $QUEUE_ID"
-            npx tsx scripts/telegram-deliver.ts --queue-id "$QUEUE_ID"
+            echo "Publishing specific queue item: $QUEUE_ID"
+            npx tsx scripts/facebook-publish.ts --queue-id "$QUEUE_ID"
           else
-            echo "Processing all pending deliveries"
-            npx tsx scripts/telegram-deliver.ts
+            echo "Processing all pending Facebook publish items"
+            npx tsx scripts/facebook-publish.ts
           fi

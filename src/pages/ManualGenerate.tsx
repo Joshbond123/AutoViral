@@ -4,14 +4,14 @@ import {
   Zap, Clock, Wand2, ChevronRight, Loader2, AlertCircle, CheckCircle,
   Bell, BellDot, X, Play, Download, Copy, Trash2, Tag, Hash,
   RefreshCw, Film, Calendar, Activity, Timer, Check, Video,
-  BellOff, BellRing, ShieldCheck, Edit2, CheckCircle2, Send,
+  BellOff, BellRing, ShieldCheck, Edit2, CheckCircle2, Share2,
 } from 'lucide-react';
 import {
   createManualJob, fetchManualJobs, deleteManualJob, updateManualJob,
   subscribeToManualJobs, fetchTodaysManualPosts, deletePost, subscribeToPosts,
   fetchNotifications, markNotificationRead, markAllNotificationsRead, deleteNotification,
   subscribeToNotifications, savePushSubscription, deletePushSubscription, getPushSubscription,
-  sendToAgent,
+  publishPostToFacebook,
 } from '../lib/api';
 import { ManualJob, AppNotification, Post } from '../types';
 
@@ -342,9 +342,9 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
   const [copiedHashtags, setCopiedHashtags] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [sendingToAgent, setSendingToAgent] = useState(false);
-  const [sentToAgent, setSentToAgent] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [publishingFb, setPublishingFb] = useState(false);
+  const [publishedFb, setPublishedFb] = useState(false);
+  const [fbError, setFbError] = useState<string | null>(null);
 
   const copyText = async (text: string, type: 'caption' | 'hashtags') => {
     try {
@@ -359,27 +359,32 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
     try { await onDelete(post.id); } finally { setDeleting(false); }
   };
 
-  const handleSendToAgent = async () => {
-    if (sendingToAgent || sentToAgent || !post.video_url) return;
+  const handlePublishToFacebook = async () => {
+    if (publishingFb || publishedFb || !post.video_url) return;
     const userId = localStorage.getItem('tiktok_user_id') || '';
-    if (!userId) { setSendError('Not logged in'); return; }
-    setSendingToAgent(true);
-    setSendError(null);
+    if (!userId) { setFbError('Not logged in'); return; }
+    setPublishingFb(true);
+    setFbError(null);
     try {
-      await sendToAgent(userId, {
+      const result = await publishPostToFacebook(userId, {
         id: post.id,
         video_url: post.video_url,
         title: post.title ?? undefined,
         caption: post.caption ?? undefined,
         hashtags: post.hashtags ?? undefined,
       });
-      setSentToAgent(true);
-      setTimeout(() => setSentToAgent(false), 5000);
+      if (result.ok) {
+        setPublishedFb(true);
+        setTimeout(() => setPublishedFb(false), 5000);
+      } else {
+        setFbError(result.error?.slice(0, 80) ?? 'No Facebook Page configured — add one in Settings');
+        setTimeout(() => setFbError(null), 5000);
+      }
     } catch (e: any) {
-      setSendError(e.message?.slice(0, 80) ?? 'Failed');
-      setTimeout(() => setSendError(null), 4000);
+      setFbError(e.message?.slice(0, 80) ?? 'Publish failed');
+      setTimeout(() => setFbError(null), 4000);
     } finally {
-      setSendingToAgent(false);
+      setPublishingFb(false);
     }
   };
 
@@ -507,24 +512,24 @@ function VideoCard({ post, onDelete }: { post: Post; onDelete: (id: string) => v
             )}
             {post.video_url && isReady && (
               <button
-                onClick={handleSendToAgent}
-                disabled={sendingToAgent || sentToAgent}
-                title={sendError ?? (sentToAgent ? 'Queued for Telegram delivery' : 'Send to Telegram Agent (@claw)')}
+                onClick={handlePublishToFacebook}
+                disabled={publishingFb || publishedFb}
+                title={fbError ?? (publishedFb ? 'Published to Facebook' : 'Publish to Facebook Page')}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all text-xs font-medium disabled:opacity-60 ${
-                  sentToAgent
-                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20'
-                    : sendError
+                  publishedFb
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-600/20'
+                    : fbError
                     ? 'bg-red-500/10 text-red-400'
-                    : 'bg-white/5 hover:bg-blue-500/10 text-white/40 hover:text-blue-400'
+                    : 'bg-white/5 hover:bg-blue-600/10 text-white/40 hover:text-blue-400'
                 }`}
               >
-                {sendingToAgent
+                {publishingFb
                   ? <Loader2 size={12} className="animate-spin" />
-                  : sentToAgent
+                  : publishedFb
                   ? <Check size={12} />
-                  : <Send size={12} />}
+                  : <Share2 size={12} />}
                 <span className="hidden sm:inline">
-                  {sendingToAgent ? 'Queuing…' : sentToAgent ? 'Queued!' : 'Send to Agent'}
+                  {publishingFb ? 'Publishing…' : publishedFb ? 'Published!' : 'Publish to Facebook'}
                 </span>
               </button>
             )}

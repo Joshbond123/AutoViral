@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { ApiKey, ManualJob, AppNotification, Post, Schedule, TelegramSettings, AgentInstruction } from '../types';
+import { ApiKey, ManualJob, AppNotification, Post, Schedule, FacebookSettings, AgentInstruction } from '../types';
 
 const SUPABASE_URL: string =
   (import.meta as any).env?.VITE_SUPABASE_URL || '';
@@ -326,43 +326,103 @@ export function subscribeToApiKeys(callback: (payload: { eventType: string; key:
   return () => { supabase.removeChannel(channel); };
 }
 
-// ─── Telegram Settings API ─────────────────────────────────────────────────────
+// ─── Facebook Settings API ─────────────────────────────────────────────────────
 
-export async function fetchTelegramSettings(userId: string): Promise<TelegramSettings | null> {
-  if (!supabase) return null;
-  const { data } = await supabase
-    .from('telegram_settings')
+export async function fetchFacebookSettings(userId: string): Promise<FacebookSettings[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('facebook_settings')
     .select('*')
     .eq('user_id', userId)
-    .maybeSingle();
-  return (data as TelegramSettings | null);
+    .order('created_at', { ascending: true });
+  if (error) { console.warn('fetchFacebookSettings error:', error.message); return []; }
+  return (data ?? []) as FacebookSettings[];
 }
 
-export async function saveTelegramSettings(
-  userId: string,
-  settings: { api_id: string; api_hash: string; session_string: string; target_chat: string }
-): Promise<void> {
+export async function addFacebookSetting(userId: string, pageAccessToken: string): Promise<FacebookSettings> {
   if (!supabase) throw new Error('Supabase not configured');
-  const { error } = await supabase
-    .from('telegram_settings')
-    .upsert({
+  let pageId: string | undefined;
+  let pageName: string | undefined;
+  let pageCategory: string | undefined;
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/me?access_token=${encodeURIComponent(pageAccessToken)}&fields=id,name,category`
+    );
+    if (res.ok) {
+      const info = await res.json();
+      if (!info.error) { pageId = info.id; pageName = info.name; pageCategory = info.category; }
+    }
+  } catch { /* non-critical — page info filled on test */ }
+
+  const { data, error } = await supabase
+    .from('facebook_settings')
+    .insert([{
       user_id: userId,
-      api_id: settings.api_id.trim(),
-      api_hash: settings.api_hash.trim(),
-      session_string: settings.session_string.trim(),
-      target_chat: (settings.target_chat || 'claw').replace(/^@/, '').trim(),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' });
+      page_access_token: pageAccessToken.trim(),
+      page_id: pageId ?? null,
+      page_name: pageName ?? null,
+      page_category: pageCategory ?? null,
+      is_active: true,
+      status: pageId ? 'active' : 'failed',
+    }])
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data as FacebookSettings;
+}
+
+export async function updateFacebookSetting(id: string, pageAccessToken: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  let pageId: string | undefined;
+  let pageName: string | undefined;
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/me?access_token=${encodeURIComponent(pageAccessToken)}&fields=id,name`
+    );
+    if (res.ok) { const info = await res.json(); if (!info.error) { pageId = info.id; pageName = info.name; } }
+  } catch { /* non-critical */ }
+  const { error } = await supabase.from('facebook_settings').update({
+    page_access_token: pageAccessToken.trim(),
+    ...(pageId ? { page_id: pageId, page_name: pageName, status: 'active' } : {}),
+    updated_at: new Date().toISOString(),
+  }).eq('id', id);
   if (error) throw new Error(error.message);
 }
 
-export async function deleteTelegramSettings(userId: string): Promise<void> {
+export async function deleteFacebookSetting(id: string): Promise<void> {
   if (!supabase) throw new Error('Supabase not configured');
-  const { error } = await supabase
-    .from('telegram_settings')
-    .delete()
-    .eq('user_id', userId);
+  const { error } = await supabase.from('facebook_settings').delete().eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+export async function testFacebookToken(id: string): Promise<{ ok: boolean; pageName?: string; error?: string }> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { data, error: fetchErr } = await supabase
+    .from('facebook_settings')
+    .select('page_access_token')
+    .eq('id', id)
+    .single();
+  if (fetchErr || !data) throw new Error('Token record not found');
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/me?access_token=${encodeURIComponent(data.page_access_token)}&fields=id,name,category`
+    );
+    const info = await res.json();
+    if (info.error) {
+      await supabase.from('facebook_settings').update({ status: 'failed', last_tested_at: new Date().toISOString() }).eq('id', id);
+      return { ok: false, error: info.error.message };
+    }
+    await supabase.from('facebook_settings').update({
+      status: 'active',
+      page_id: info.id,
+      page_name: info.name,
+      last_tested_at: new Date().toISOString(),
+    }).eq('id', id);
+    return { ok: true, pageName: info.name };
+  } catch (e: any) {
+    await supabase.from('facebook_settings').update({ status: 'failed', last_tested_at: new Date().toISOString() }).eq('id', id);
+    return { ok: false, error: e.message ?? String(e) };
+  }
 }
 
 // ─── Agent Instructions API ────────────────────────────────────────────────────
@@ -407,50 +467,30 @@ export async function deleteAgentInstruction(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-// ─── Send to Agent (Manual Delivery) ──────────────────────────────────────────
+// ─── Publish to Facebook (Manual) ─────────────────────────────────────────────
 
-export async function sendToAgent(
+export async function publishPostToFacebook(
   userId: string,
   post: { id: string; video_url: string; title?: string; caption?: string; hashtags?: string }
-): Promise<{ ok: boolean; dispatched: boolean }> {
-  if (!supabase) throw new Error('Supabase not configured');
-
-  const { data: queueRow, error: queueErr } = await supabase
-    .from('telegram_delivery_queue')
-    .insert([{
-      user_id: userId,
-      post_id: post.id,
-      video_url: post.video_url,
+): Promise<{ ok: boolean; dispatched: boolean; error?: string }> {
+  if (!FUNCS_BASE) throw new Error('Supabase not configured');
+  const res = await fetch(`${FUNCS_BASE}/publish-to-facebook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId,
+      postId: post.id,
+      videoUrl: post.video_url,
       title: post.title ?? null,
       caption: post.caption ?? null,
       hashtags: post.hashtags ?? null,
-      status: 'pending',
-    }])
-    .select()
-    .single();
-
-  if (queueErr) throw new Error(queueErr.message);
-
-  let dispatched = false;
-  if (FUNCS_BASE) {
-    try {
-      const res = await fetch(`${FUNCS_BASE}/send-to-agent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          postId: post.id,
-          videoUrl: post.video_url,
-          title: post.title,
-          caption: post.caption,
-          hashtags: post.hashtags,
-          queueId: (queueRow as any)?.id,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      dispatched = json?.dispatched === true;
-    } catch { /* Non-fatal — queue will be picked up on next pipeline run */ }
-  }
-
-  return { ok: true, dispatched };
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((json as any)?.error ?? `HTTP ${res.status}`);
+  return {
+    ok: (json as any)?.ok === true,
+    dispatched: (json as any)?.dispatched === true,
+    error: (json as any)?.error,
+  };
 }

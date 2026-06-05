@@ -1,15 +1,42 @@
 import { motion } from 'motion/react';
-import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, Share2, BarChart2, LogOut, TrendingUp, Film } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Play, CheckCircle2, AlertCircle, Clock, Video, Eye, BarChart2, LogOut, TrendingUp, Film, Facebook, Loader2 } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Post } from '../types';
-import { fetchHistory, fetchScheduledCount, subscribeToPosts } from '../lib/api';
+import { fetchHistory, fetchScheduledCount, subscribeToPosts, publishPostToFacebook } from '../lib/api';
 
 export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [scheduledCount, setScheduledCount] = useState<number>(0);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [publishResults, setPublishResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const autoPublishedIds = useRef<Set<string>>(new Set());
   const navigate = useNavigate();
+
+  const handlePublishToFacebook = useCallback(async (post: Post, userId: string) => {
+    if (!post.video_url) {
+      setPublishResults(prev => ({ ...prev, [post.id]: { ok: false, msg: 'No video URL yet' } }));
+      return;
+    }
+    setPublishingId(post.id);
+    try {
+      const result = await publishPostToFacebook(userId, post);
+      setPublishResults(prev => ({
+        ...prev,
+        [post.id]: {
+          ok: result.ok,
+          msg: result.ok
+            ? (result.dispatched ? 'Queued for Facebook' : 'Published to Facebook!')
+            : (result.error ?? 'Publish failed'),
+        },
+      }));
+    } catch (e: any) {
+      setPublishResults(prev => ({ ...prev, [post.id]: { ok: false, msg: e.message ?? 'Publish failed' } }));
+    } finally {
+      setPublishingId(null);
+    }
+  }, []);
 
   useEffect(() => {
     const userId = localStorage.getItem('tiktok_user_id');
@@ -38,19 +65,40 @@ export default function Dashboard() {
     })();
 
     // Real-time subscription — updates dashboard live when pipeline runs
+    // Auto-publishes to Facebook when a video reaches 'rendered' status
     const unsub = subscribeToPosts(userId, (post) => {
       setPosts(prev => {
         const exists = prev.find(p => p.id === post.id);
         if (exists) return prev.map(p => p.id === post.id ? post : p);
         return [post, ...prev].slice(0, 20);
       });
+
+      if (post.status === 'rendered' && post.video_url && !autoPublishedIds.current.has(post.id)) {
+        autoPublishedIds.current.add(post.id);
+        publishPostToFacebook(userId, post).then(result => {
+          setPublishResults(prev => ({
+            ...prev,
+            [post.id]: {
+              ok: result.ok,
+              msg: result.ok
+                ? (result.dispatched ? '↑ Auto-queued for Facebook' : '↑ Auto-published to Facebook')
+                : (result.error ?? 'Auto-publish failed'),
+            },
+          }));
+        }).catch(err => {
+          setPublishResults(prev => ({
+            ...prev,
+            [post.id]: { ok: false, msg: `Auto-publish: ${err.message ?? 'failed'}` },
+          }));
+        });
+      }
     });
 
     return () => {
       cancelled = true;
       unsub();
     };
-  }, []);
+  }, [handlePublishToFacebook]);
 
   const handleSignOut = async () => {
     const { supabaseAuth } = await import('../lib/supabase');
@@ -101,7 +149,7 @@ export default function Dashboard() {
                   Pipeline Active
                 </h2>
                 <p className="text-white/40 text-xs font-mono mt-1">
-                  AI pipeline runs every 10 minutes via GitHub Actions
+                  AI pipeline runs every 10 minutes · Auto-publishes to Facebook on completion
                 </p>
               </div>
             </div>
@@ -164,12 +212,43 @@ export default function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm truncate">{post.title || post.topic || 'Generating…'}</p>
                     <p className="text-white/40 text-xs truncate">{post.niche || '—'}</p>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <StatusBadge status={post.status} />
                       <span className="text-xs text-white/30 font-mono">
                         {post.published_at ? new Date(post.published_at).toLocaleDateString() : '—'}
                       </span>
                     </div>
+                    {publishResults[post.id] && (
+                      <p className={`text-[10px] mt-1 font-mono truncate ${publishResults[post.id].ok ? 'text-blue-400' : 'text-red-400'}`}>
+                        {publishResults[post.id].msg}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    {post.video_url && (
+                      <a
+                        href={post.video_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all"
+                        title="Watch video"
+                      >
+                        <Eye size={14} />
+                      </a>
+                    )}
+                    <button
+                      onClick={() => {
+                        const uid = localStorage.getItem('tiktok_user_id') ?? '';
+                        handlePublishToFacebook(post, uid);
+                      }}
+                      disabled={publishingId === post.id || !post.video_url}
+                      className="p-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={post.video_url ? 'Publish to Facebook' : 'No video available'}
+                    >
+                      {publishingId === post.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <Facebook size={14} />}
+                    </button>
                   </div>
                 </div>
               ))
@@ -225,7 +304,14 @@ export default function Dashboard() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <StatusBadge status={post.status} />
+                      <div className="space-y-1.5">
+                        <StatusBadge status={post.status} />
+                        {publishResults[post.id] && (
+                          <p className={`text-[10px] font-mono ${publishResults[post.id].ok ? 'text-blue-400' : 'text-red-400'}`}>
+                            {publishResults[post.id].msg}
+                          </p>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-white/60">
@@ -251,8 +337,18 @@ export default function Dashboard() {
                         <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
                           <BarChart2 size={16} />
                         </button>
-                        <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all">
-                          <Share2 size={16} />
+                        <button
+                          onClick={() => {
+                            const uid = localStorage.getItem('tiktok_user_id') ?? '';
+                            handlePublishToFacebook(post, uid);
+                          }}
+                          disabled={publishingId === post.id || !post.video_url}
+                          className="p-2 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={post.video_url ? 'Publish to Facebook' : 'No video available'}
+                        >
+                          {publishingId === post.id
+                            ? <Loader2 size={16} className="animate-spin" />
+                            : <Facebook size={16} />}
                         </button>
                       </div>
                     </td>

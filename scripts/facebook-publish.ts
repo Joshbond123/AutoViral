@@ -14,6 +14,8 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
+const WEBSITE_LINK = 'https://onchain-detectives.free.nf';
+
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error('❌  SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are required.');
   process.exit(1);
@@ -28,6 +30,88 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const args = process.argv.slice(2);
 const queueIdIdx = args.indexOf('--queue-id');
 const targetQueueId: string | null = queueIdIdx !== -1 ? (args[queueIdIdx + 1] ?? null) : null;
+
+// ─── Cerebras Comment Generator ───────────────────────────────────────────────
+
+async function generateAndPostFacebookComment(
+  supabaseClient: ReturnType<typeof createClient>,
+  pageToken: string,
+  fbPostId: string,
+  title: string,
+  topic: string
+): Promise<void> {
+  // Fetch one active Cerebras key from Supabase
+  const { data: keys } = await supabaseClient
+    .from('api_keys')
+    .select('api_key')
+    .eq('service', 'cerebras')
+    .eq('status', 'active')
+    .limit(1);
+
+  const cerebrasKey = keys?.[0]?.api_key as string | undefined;
+  let commentText: string;
+
+  if (cerebrasKey) {
+    const prompt = `You are a social media engagement specialist for a crypto scam awareness page.
+
+Write a single engaging Facebook comment to post under a newly published video about:
+Title: "${title}"
+Topic: "${topic || title}"
+
+REQUIREMENTS:
+- Directly relevant to this specific scam type — not generic
+- Encourages viewers to like and share the post
+- Asks one thought-provoking question to spark discussion
+- Naturally includes this link: ${WEBSITE_LINK}
+- Maximum 280 characters total (including the link)
+- Urgent, authentic tone — like an investigator speaking to potential victims
+- NEVER start with "Great video", "Thanks for watching", or similar generic openers
+- Return ONLY the comment text — no quotes, no labels, no explanation`;
+
+    try {
+      const aiResp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cerebrasKey}` },
+        body: JSON.stringify({
+          model: 'gpt-oss-120b',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 400,
+        }),
+      });
+      if (aiResp.ok) {
+        const aiJson: any = await aiResp.json();
+        const raw = ((aiJson?.choices?.[0]?.message?.content as string) || '').trim().replace(/^["']|["']$/g, '');
+        commentText = raw.includes(WEBSITE_LINK)
+          ? raw.slice(0, 500)
+          : `${raw.slice(0, 220)} ${WEBSITE_LINK}`.trim();
+      } else {
+        throw new Error(`Cerebras ${aiResp.status}`);
+      }
+    } catch (e: any) {
+      console.warn(`  ⚠ Cerebras comment generation failed: ${e.message} — using fallback`);
+      commentText = `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could protect others. Get free help at ${WEBSITE_LINK}`;
+    }
+  } else {
+    console.warn('  ⚠ No active Cerebras key found — using fallback comment');
+    commentText = `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could protect others. Get free help at ${WEBSITE_LINK}`;
+  }
+
+  // Post the comment to Facebook
+  const commentResp = await fetch(
+    `https://graph.facebook.com/v20.0/${fbPostId}/comments`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: pageToken, message: commentText }),
+    }
+  );
+  if (!commentResp.ok) {
+    const err = await commentResp.text();
+    throw new Error(`Facebook comment API ${commentResp.status}: ${err.slice(0, 200)}`);
+  }
+  const commentJson: any = await commentResp.json();
+  console.log(`  💬 Auto-comment posted: ${commentJson.id}`);
+}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -148,6 +232,14 @@ async function processItem(item: any) {
       status: 'active',
       last_published_at: new Date().toISOString(),
     }).eq('id', fbSettings.id);
+
+    // Auto-generate and post an engaging comment with the website link
+    try {
+      console.log('  💬 Generating auto-comment...');
+      await generateAndPostFacebookComment(supabase, token, fbPostId, item.title || '', item.title || '');
+    } catch (ce: any) {
+      console.warn(`  ⚠ Auto-comment failed (non-critical): ${ce.message?.slice(0, 80)}`);
+    }
 
     // Create notification
     try {

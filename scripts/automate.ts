@@ -92,19 +92,22 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
         return result;
       } catch (e: any) {
         const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic|neurons|daily.*alloc/i.test(e.message ?? '');
+        // Model-not-found (404) means the model name is wrong, NOT that the key is invalid — don't permanently fail the key
+        const isModelNotFound = /model.*not.*exist|model.*not.*found|model_not_found|does not exist or you do not have access/i.test(e.message ?? '');
         if (isRateLimit && attempt < maxAttempts) {
           const delay = attempt === 1 ? 15000 : 60000;
           console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
           await new Promise(res => setTimeout(res, delay));
           continue;
         }
+        const newStatus = isRateLimit ? 'rate_limited' : (isModelNotFound ? 'active' : 'failed');
         await supabase.from('api_keys').update({
           error_count: key.error_count + 1,
           request_count: key.request_count + 1,
-          status: isRateLimit ? 'rate_limited' : 'failed',
+          status: newStatus,
           last_used_at: new Date().toISOString(),
         }).eq('id', key.id);
-        console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] [${service}]: ${isRateLimit ? 'rate_limited' : 'failed'} — ${e.message.slice(0, 120)}`);
+        console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] [${service}]: ${newStatus} — ${e.message.slice(0, 120)}`);
         lastError = e;
         break;
       }
@@ -116,11 +119,11 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
 
 // ─── Cerebras Multi-Model Chat (rate-limit resilient) ─────────────────────────
 
+// FIX: Updated to current Cerebras-available models (verified via /v1/models endpoint 2026-06-06)
+// Removed: qwen-3-32b, llama3.3-70b, llama3.1-70b, llama3.1-8b (all return 404 model_not_found)
 const CEREBRAS_MODELS = [
-  'qwen-3-32b',
-  'llama3.3-70b',
-  'llama3.1-70b',
-  'llama3.1-8b',
+  'gpt-oss-120b',
+  'zai-glm-4.7',
 ];
 
 async function cerebrasChat(
@@ -144,7 +147,11 @@ async function cerebrasChat(
         continue;
       }
       const json = await resp.json() as any;
-      return (json.choices?.[0]?.message?.content ?? '').trim();
+      const msg = json.choices?.[0]?.message;
+      // FIX: gpt-oss-120b and zai-glm-4.7 are reasoning models — fall back to reasoning field when content is empty
+      const text = (msg?.content || msg?.reasoning || '').trim();
+      if (!text) throw new Error(`Cerebras (${model}) returned empty content and reasoning`);
+      return text;
     } catch (e: any) {
       lastErr = e as Error;
       if (/429|rate.?limit|too.?many|quota|exceeded/.test(e.message ?? '')) {

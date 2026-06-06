@@ -184,7 +184,7 @@ async function pickUniqueTopic(niche: string): Promise<string> {
 
   const used = (history ?? []).map((h: any) => h.topic_title.toLowerCase());
 
-  const prompt = `You are a TikTok investigative journalist covering crypto scam awareness.
+  const prompt = `You are an investigative journalist covering crypto scam awareness.
 Generate ONE specific, viral topic title for the niche: "${niche}".
 
 STRICT RULES:
@@ -207,12 +207,12 @@ Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 // ─── Script Generation ────────────────────────────────────────────────────────
 
 async function generateScript(topic: string, niche: string): Promise<ScriptResult> {
-  const prompt = `You are a professional TikTok investigative journalist creating viral crypto scam awareness content.
+  const prompt = `You are a professional investigative journalist creating viral crypto scam awareness content for social media.
 
 Topic: "${topic}"
 Niche: ${niche}
 
-Write a complete TikTok video package. Follow every rule exactly.
+Write a complete social media video package. Follow every rule exactly.
 
 VOICEOVER RULES (the "script" field):
 - Pure natural spoken words only — exactly what the narrator says out loud
@@ -223,7 +223,7 @@ VOICEOVER RULES (the "script" field):
 - CRITICAL: NEVER use first-person narration — BANNED words: "I", "I've", "I was", "I lost", "I joined", "me", "my", "we joined", "our wallet"
 - The narrator is a journalist REPORTING on scams, NOT a victim telling their story
 - Be factual, specific, dramatic — name the scam type, explain how it works, warn the viewer
-- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings."
+- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings."
 - FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
@@ -255,7 +255,7 @@ SCENE RULES (the "scenes" array):
 
 Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 {
-  "title": "Viral TikTok warning title, under 80 characters, no emojis, no first-person",
+  "title": "Viral warning title, under 80 characters, no emojis, no first-person",
   "script": "Pure spoken voiceover paragraph — journalistic, no first-person, no labels",
   "scenes": [
     "[SCENE 1 — HOOK: Replace with ultra-wide establishing image that SHOWS the shocking scale or nature of the specific scam described in the opening voiceover sentence. Include exact subject, dominant cold color, and environment.]",
@@ -300,10 +300,10 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
             l.length > 60 && l.length < 600 && !l.startsWith('"') && !l.includes('://') &&
             !l.includes('{') && !/{\s*"/.test(l) && !/^(Scene|Title|Narrator)\s*[:\d]/i.test(l) &&
             !VISUAL_LANG_KW.test(l) &&
-            /\b(crypto|scam|fraud|victim|warning|alert|millions|thousands|stolen|protect|follow|TikTok|send|invest|wallet|you|your|this|these|how|what|why|when|people|today|now|already|never|always|beware)\b/i.test(l)
+            /\b(crypto|scam|fraud|victim|warning|alert|millions|thousands|stolen|protect|follow|send|invest|wallet|you|your|this|these|how|what|why|when|people|today|now|already|never|always|beware)\b/i.test(l)
           );
           _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
-            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
+            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
         }
         return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
       }
@@ -312,7 +312,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
     // Emergency fallback — still topic-specific with diverse compositions
     return {
       title: topic.slice(0, 150),
-      script: `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
+      script: `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
       scenes: [
         `Ultra-wide cold blue-teal shot — a dark sprawling digital network map representing the ${topic} operation, thousands of phantom connection lines spreading across an infinite dark grid, ominous scale`,
         `Extreme macro close-up — a finger hovering over a glowing touchscreen showing a fraudulent ${topic} interface, warm amber backlight, shallow depth of field, sweat on fingertip, intense and immediate`,
@@ -333,9 +333,9 @@ interface CaptionResult {
 
 async function generateCaptionAndHashtags(topic: string, niche: string, title: string, script: string): Promise<CaptionResult> {
   const scriptPreview = script.slice(0, 250);
-  const prompt = `You are a viral TikTok content strategist specializing in crypto scam awareness content.
+  const prompt = `You are a viral social media content strategist specializing in crypto scam awareness content.
 
-Create a viral TikTok caption and hashtag set for this video:
+Create a viral social media caption and hashtag set for this video:
 Title: "${title}"
 Topic: "${topic}"
 Niche: "${niche}"
@@ -418,7 +418,7 @@ function cleanVoiceoverScript(raw: string): string {
   if (speech.length > 0) {
     return speech.join(' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
   }
-  return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. If you have been a victim of a crypto scam, send us a direct message on TikTok right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.';
+  return text.slice(0, 3000) || 'This crypto scam is destroying lives. Stay informed. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.';
 }
 
 // ─── Voiceover + Real Timestamps (UnrealSpeech /synthesisTasks) ──────────────
@@ -966,6 +966,56 @@ async function uploadFile(localPath: string, bucketPath: string, mime: string): 
   return data.publicUrl;
 }
 
+// ─── Facebook Comment Generation ──────────────────────────────────────────────
+
+async function generateFacebookComment(topic: string, title: string): Promise<string> {
+  const WEBSITE_LINK = 'https://onchain-detectives.free.nf';
+  const prompt = `You are a social media engagement specialist for a crypto scam awareness page.
+
+Write a single engaging Facebook comment to post under a newly published video about:
+Title: "${title}"
+Topic: "${topic}"
+
+REQUIREMENTS:
+- Directly relevant to this specific scam type — not generic
+- Encourages viewers to like and share the post
+- Asks one thought-provoking question to spark discussion
+- Naturally includes this link: ${WEBSITE_LINK}
+- Maximum 280 characters total (including the link)
+- Urgent, authentic tone — like an investigator speaking to potential victims
+- NEVER start with "Great video", "Thanks for watching", or similar generic openers
+- Return ONLY the comment text — no quotes, no labels, no explanation`;
+
+  try {
+    return await tryWithKeys('cerebras', async (key) => {
+      const text = await cerebrasChat(key, [{ role: 'user', content: prompt }], 400);
+      const clean = text.replace(/^["']|["']$/g, '').trim();
+      return clean.includes(WEBSITE_LINK)
+        ? clean.slice(0, 500)
+        : `${clean.slice(0, 220)} ${WEBSITE_LINK}`.trim();
+    });
+  } catch {
+    return `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could save others. Get help at ${WEBSITE_LINK}`;
+  }
+}
+
+async function postFacebookComment(token: string, postId: string, commentText: string): Promise<void> {
+  const resp = await fetch(
+    `https://graph.facebook.com/v20.0/${postId}/comments`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: token, message: commentText }),
+    }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Facebook comment API ${resp.status}: ${err.slice(0, 200)}`);
+  }
+  const json: any = await resp.json();
+  console.log(`  💬 Auto-comment posted: ${json.id}`);
+}
+
 // ─── Facebook Page Publishing ──────────────────────────────────────────────────
 
 async function publishToFacebook(
@@ -974,7 +1024,8 @@ async function publishToFacebook(
   caption: string,
   hashtags: string,
   userId: string,
-  postId: string | null
+  postId: string | null,
+  topic: string = ''
 ): Promise<boolean> {
   const { data: fbSettings } = await supabase
     .from('facebook_settings')
@@ -1025,6 +1076,15 @@ async function publishToFacebook(
       status: 'active',
       last_published_at: new Date().toISOString(),
     }).eq('id', fbSettings.id);
+
+    // Auto-generate and post an engaging comment with the website link
+    try {
+      console.log('  💬 Generating auto-comment...');
+      const commentText = await generateFacebookComment(topic || title, title);
+      await postFacebookComment(token, fbPostId, commentText);
+    } catch (ce: any) {
+      console.warn(`  ⚠ Auto-comment failed (non-critical): ${ce.message?.slice(0, 80)}`);
+    }
 
     return true;
   } catch (e: any) {
@@ -1280,7 +1340,7 @@ async function runPipeline(schedule: any): Promise<void> {
 
     // 8. Publish to Facebook Page
     console.log('  8/8 Publishing to Facebook Page...');
-    const facebookOk = await publishToFacebook(videoUrl, title, caption, hashtags, userId, postId);
+    const facebookOk = await publishToFacebook(videoUrl, title, caption, hashtags, userId, postId, topic);
 
     const elapsed = Date.now() - startTime;
 

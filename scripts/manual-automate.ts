@@ -92,15 +92,15 @@ async function tryWithKeys<T>(service: string, fn: (key: string) => Promise<T>):
         return result;
       } catch (e: any) {
         const isRateLimit = /429|rate.?limit|too.?many|quota|exceeded|high.?traffic|neurons|daily.*alloc/i.test(e.message ?? '');
-        // Model-not-found (404) means the model name is wrong, NOT that the key is invalid — don't permanently fail the key
-        const isModelNotFound = /model.*not.*exist|model.*not.*found|model_not_found|does not exist or you do not have access/i.test(e.message ?? '');
+        // Model-not-found (404) or empty-content errors mean a config/capacity issue — NOT a bad API key
+        const isNonKeyError = /model.*not.*exist|model.*not.*found|model_not_found|does not exist or you do not have access|increase max_tokens|empty content|No JSON in response/i.test(e.message ?? '');
         if (isRateLimit && attempt < maxAttempts) {
           const delay = attempt === 1 ? 15000 : 60000;
           console.warn(`  ⚠ Key [${key.id.slice(0, 8)}] rate limited — retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
           await new Promise(res => setTimeout(res, delay));
           continue;
         }
-        const newStatus = isRateLimit ? 'rate_limited' : (isModelNotFound ? 'active' : 'failed');
+        const newStatus = isRateLimit ? 'rate_limited' : (isNonKeyError ? 'active' : 'failed');
         await supabase.from('api_keys').update({
           error_count: key.error_count + 1,
           request_count: key.request_count + 1,
@@ -148,9 +148,12 @@ async function cerebrasChat(
       }
       const json = await resp.json() as any;
       const msg = json.choices?.[0]?.message;
-      // FIX: gpt-oss-120b and zai-glm-4.7 are reasoning models — fall back to reasoning field when content is empty
-      const text = (msg?.content || msg?.reasoning || '').trim();
-      if (!text) throw new Error(`Cerebras (${model}) returned empty content and reasoning`);
+      // FIX: For reasoning models (gpt-oss-120b, zai-glm-4.7), ONLY use content — never reasoning.
+      // The reasoning field is the internal chain-of-thought and often reflects the prompt back;
+      // it is never the final answer. If content is empty, max_tokens was too low — throw a
+      // retryable error (NOT a key failure — the key itself is fine).
+      const text = (msg?.content ?? '').trim();
+      if (!text) throw new Error(`Cerebras (${model}) returned empty content — increase max_tokens`);
       return text;
     } catch (e: any) {
       lastErr = e as Error;
@@ -194,7 +197,8 @@ AVOID these already-used topics: ${used.slice(0, 40).join(' | ')}
 Return ONLY the topic title — nothing else, no quotes, no extra text.`;
 
   return tryWithKeys('cerebras', async (key) => {
-    const rawTopic = await cerebrasChat(key, [{ role: 'user', content: prompt }], 80);
+    // FIX: increased from 80 to 500 — reasoning models need budget for both reasoning AND content output
+    const rawTopic = await cerebrasChat(key, [{ role: 'user', content: prompt }], 500);
     const topic = rawTopic.replace(/^["']|["']$/g, '');
     return topic || `${niche} Warning — ${new Date().toLocaleDateString()}`;
   });
@@ -360,7 +364,8 @@ Return ONLY valid JSON, no markdown, no explanation:
 
   try {
     return await tryWithKeys('cerebras', async (key) => {
-      const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 400);
+      // FIX: increased from 400 to 1200 — reasoning models need token budget for reasoning + JSON content output
+      const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 1200);
       const match = content.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);

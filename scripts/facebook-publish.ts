@@ -96,7 +96,8 @@ REQUIREMENTS:
         body: JSON.stringify({
           model: 'gpt-oss-120b',
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 400,
+          // FIX: max_tokens raised 400 → 2000 — reasoning models need budget for reasoning + content
+            max_tokens: 2000,
         }),
       });
       if (aiResp.ok) {

@@ -946,10 +946,10 @@ async function assembleVideoWithRemotion(
       composition: { ...composition, durationInFrames },
       serveUrl: bundleLocation,
       codec: 'h264',
-      // HIGH-QUALITY ENCODING for Facebook: CRF 18 = visually near-lossless; 8 Mbps ensures
-      // Facebook's re-encoder receives a high-bitrate source and produces better output quality.
+      // HIGH-QUALITY ENCODING for Facebook: CRF 18 = visually near-lossless.
+      // Note: Remotion does not allow crf + videoBitrate simultaneously — crf alone is used.
+      // audioBitrate 192k ensures high-quality AAC audio for Facebook re-encoding.
       crf: 18,
-      videoBitrate: '8000k',
       audioBitrate: '192k',
       outputLocation: outputPath,
       inputProps,

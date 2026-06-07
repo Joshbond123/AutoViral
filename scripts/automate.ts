@@ -267,7 +267,10 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
 }`;
 
   return tryWithKeys('cerebras', async (key) => {
-    const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 2000);
+    // FIX: max_tokens raised 2000 → 16000 — reasoning models (gpt-oss-120b, zai-glm-4.7)
+      // consume most tokens internally; with 2000 the JSON gets truncated → parse fails →
+      // 47-word emergency fallback → ~19s audio → ~25s video. 16000 gives the model full room.
+      const content = await cerebrasChat(key, [{ role: 'user', content: prompt }], 16000);
 
     try {
       const match = content.match(/\{[\s\S]*\}/);
@@ -305,14 +308,20 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
           _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
             || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
         }
-        return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
+        // GUARD: minimum 80 words (~30s audio). If script is shorter, JSON parsing partially failed.
+          const _scriptWordCount = _scriptText.split(/\s+/).filter(Boolean).length;
+          if (_scriptWordCount < 80) {
+            console.warn(`  ⚠ Script only ${_scriptWordCount} words (need 80+ for full-length video) — using extended fallback`);
+            _scriptText = `WARNING: A sophisticated crypto fraud operation is targeting investors globally right now, and it could cost you everything you have worked for. The scheme has already stolen millions from thousands of victims using fake platforms, deepfake celebrity endorsements, and AI-powered chatbots designed to sound exactly like real financial advisors. Scammers build trust carefully over weeks or months before vanishing overnight with your entire investment. The victims are not careless people — they are intelligent, educated individuals who were systematically deceived by increasingly professional fraud operations. Warning signs are always present if you know what to look for: guaranteed returns with no risk, pressure to invest larger amounts, and requests to recruit your friends and family into the scheme. Authorities are warning the public to independently verify every investment platform before sending a single dollar. If you recognize any of these patterns, stop immediately and seek help. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
+          }
+          return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
       }
     } catch { /* fall through */ }
 
     // Emergency fallback — still topic-specific with diverse compositions
     return {
       title: topic.slice(0, 150),
-      script: `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
+      script: `WARNING: A sophisticated crypto fraud operation is targeting investors across the globe right now, and it could cost you everything. This scheme has already stolen millions from thousands of unsuspecting victims using fake platforms, deepfake celebrity endorsements, and AI-powered chatbots designed to sound like legitimate financial advisors. Scammers build trust carefully over weeks or months before vanishing overnight with your funds. The victims are not naive — they are intelligent people who were deceived by increasingly professional fraud. Warning signs are always present: guaranteed returns, pressure to invest more, requests to recruit friends and family. Authorities are warning everyone to independently verify any investment platform before sending a single dollar. If you recognize any of these patterns in an investment you are currently involved in, stop immediately and seek help. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
       scenes: [
         `Ultra-wide cold blue-teal shot — a dark sprawling digital network map representing the ${topic} operation, thousands of phantom connection lines spreading across an infinite dark grid, ominous scale`,
         `Extreme macro close-up — a finger hovering over a glowing touchscreen showing a fraudulent ${topic} interface, warm amber backlight, shallow depth of field, sweat on fingertip, intense and immediate`,
@@ -838,7 +847,13 @@ async function assembleVideoWithRemotion(
     }
   }
 
-  const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 120);
+  // GUARD: if audio is suspiciously short (< 25s), the script generation likely used the
+    // emergency fallback. Fail fast so the schedule can be retried with a full-length script.
+    if (audioDurationSec < 25) {
+      throw new Error(`Audio too short (${audioDurationSec.toFixed(1)}s < 25s minimum) — script generation produced a fallback. Will retry automatically.`);
+    }
+
+    const totalSec = Math.min(audioDurationSec + AUDIO_BUFFER_SEC + OUTRO_SEC, 120);
   const durationInFrames = Math.ceil(totalSec * FPS);
 
   const rawAudioFrames = Math.round(audioDurationSec * FPS);
@@ -925,13 +940,21 @@ async function assembleVideoWithRemotion(
   // FIX: concurrency raised from 1 → 2 for ~50% faster rendering on 2-core GitHub Actions runners
   console.log(`  Rendering ${durationInFrames} frames at 1080×1920 (concurrency: 2)...`);
   await renderMedia({
-    composition,
-    serveUrl: bundleLocation,
-    codec: 'h264',
-    outputLocation: outputPath,
-    inputProps,
-    timeoutInMilliseconds: 20 * 60 * 1000,
-    concurrency: 2,
+      // FIX: explicitly spread composition with computed durationInFrames override.
+      // calculateMetadata should already set this correctly, but spreading ensures the
+      // renderer uses the dynamically computed value regardless of Remotion version behavior.
+      composition: { ...composition, durationInFrames },
+      serveUrl: bundleLocation,
+      codec: 'h264',
+      // HIGH-QUALITY ENCODING for Facebook: CRF 18 = visually near-lossless; 8 Mbps ensures
+      // Facebook's re-encoder receives a high-bitrate source and produces better output quality.
+      crf: 18,
+      videoBitrate: '8000k',
+      audioBitrate: '192k',
+      outputLocation: outputPath,
+      inputProps,
+      timeoutInMilliseconds: 20 * 60 * 1000,
+      concurrency: 2,
     chromiumOptions: {
       disableWebSecurity: true,
       gl: 'swiftshader',
@@ -981,7 +1004,8 @@ REQUIREMENTS:
 
   try {
     return await tryWithKeys('cerebras', async (key) => {
-      const text = await cerebrasChat(key, [{ role: 'user', content: prompt }], 400);
+      // FIX: max_tokens raised 400 → 2000 for comment generation
+        const text = await cerebrasChat(key, [{ role: 'user', content: prompt }], 2000);
       const clean = text.replace(/^["']|["']$/g, '').trim();
       return clean.includes(WEBSITE_LINK)
         ? clean.slice(0, 500)

@@ -67,7 +67,7 @@ const OutroCard: React.FC<{ frame: number; fps: number; outroStart: number }> = 
   const subScale = interpolate(subSpring, [0, 1], [0.78, 1.0]);
   const subOpacity = interpolate(local, [14, 30], [0, 1], { extrapolateRight: 'clamp' });
 
-  // DM button springs in third
+  // CTA button springs in third
   const btnSpring = spring({ frame: Math.max(0, local - 32), fps, config: { damping: 11, stiffness: 300, mass: 0.6 } });
   const btnScale = interpolate(btnSpring, [0, 1], [0.68, 1.0]);
   const btnOpacity = interpolate(local, [28, 46], [0, 1], { extrapolateRight: 'clamp' });
@@ -142,7 +142,7 @@ const OutroCard: React.FC<{ frame: number; fps: number; outroStart: number }> = 
           </p>
         </div>
 
-        {/* DM button with pulse */}
+        {/* CTA button with pulse */}
         <div style={{
           opacity: btnOpacity,
           transform: `scale(${btnScale * pulse})`,
@@ -162,7 +162,7 @@ const OutroCard: React.FC<{ frame: number; fps: number; outroStart: number }> = 
             margin: 0,
             textShadow: '0 2px 12px rgba(0,0,0,0.6)',
           }}>
-            DM US ON TIKTOK
+            SUBMIT YOUR CASE
           </p>
         </div>
 

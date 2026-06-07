@@ -329,12 +329,14 @@ interface CaptionResult {
   hashtags: string;
 }
 
+const FIXED_HASHTAGS = '#Crypto #Bitcoin #Ethereum #CryptoNews #Altcoins';
+
 async function generateCaptionAndHashtags(topic: string, niche: string, title: string, script: string): Promise<CaptionResult> {
   const scriptPreview = script.slice(0, 250);
 
   const prompt = `You are a viral social media content strategist specializing in crypto scam awareness content.
 
-Create a viral social media caption and hashtag set for this video:
+Create a viral social media caption for this video:
 Title: "${title}"
 Topic: "${topic}"
 Niche: "${niche}"
@@ -348,18 +350,9 @@ CAPTION RULES:
 - No emojis
 - Pure text, highly engaging
 
-HASHTAG RULES:
-- Exactly 5 hashtags — no more, no less
-- Focus EXCLUSIVELY on crypto scam awareness and fraud prevention
-- Always include #cryptoscam and #crypto
-- The remaining 3 must come from: #cryptofraud #scamalert #cryptoawareness #blockchainscam #cryptosafety #web3security #cryptowarning #investmentscam #cryptoscams #scamwatch #cryptofraudAlert #blockchainfraud #cryptoprotection
-- Choose the 3 most relevant to this specific scam type
-- Format: space-separated on one line, no duplicates
-
 Return ONLY valid JSON, no markdown, no explanation:
 {
-  "caption": "your caption here",
-  "hashtags": "#cryptoscam #crypto #scamalert #cryptoawareness #cryptofraud"
+  "caption": "your caption here"
 }`;
 
   try {
@@ -371,7 +364,7 @@ Return ONLY valid JSON, no markdown, no explanation:
         const parsed = JSON.parse(match[0]);
         return {
           caption: (parsed.caption || `${title} - This crypto scam could steal everything from you. Share to protect others. Follow for daily crypto scam warnings.`).slice(0, 150),
-          hashtags: parsed.hashtags || '#cryptoscam #crypto #scamalert #cryptofraud #cryptoawareness',
+          hashtags: FIXED_HASHTAGS,
         };
       }
       throw new Error('No JSON in response');
@@ -380,7 +373,7 @@ Return ONLY valid JSON, no markdown, no explanation:
     console.warn(`  ⚠ Caption generation failed: ${e.message} — using defaults`);
     return {
       caption: `${title.slice(0, 100)} - This crypto scam has already stolen millions. Share to warn others. Follow for daily crypto scam warnings.`,
-      hashtags: '#cryptoscam #crypto #scamalert #cryptofraud #cryptoawareness',
+      hashtags: FIXED_HASHTAGS,
     };
   }
 }
@@ -1103,21 +1096,55 @@ REQUIREMENTS:
   }
 }
 
-async function postFacebookComment(token: string, postId: string, commentText: string): Promise<void> {
-  const resp = await fetch(
-    `https://graph.facebook.com/v20.0/${postId}/comments`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: token, message: commentText }),
+// Resolve the feed post ID from a video ID (video upload returns video_id, not post_id)
+async function getVideoFeedPostId(token: string, videoId: string): Promise<string> {
+  try {
+    const resp = await fetch(
+      `https://graph.facebook.com/v20.0/${videoId}?fields=id,posts&access_token=${encodeURIComponent(token)}`
+    );
+    if (resp.ok) {
+      const json: any = await resp.json();
+      const postId = json?.posts?.data?.[0]?.id;
+      if (postId) {
+        console.log(`  🔗 Resolved feed post ID for comment: ${postId}`);
+        return postId;
+      }
     }
-  );
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Facebook comment API ${resp.status}: ${err.slice(0, 200)}`);
+  } catch {}
+  // Fallback to video ID if query fails
+  console.log(`  🔗 Using video ID directly for comment: ${videoId}`);
+  return videoId;
+}
+
+async function postFacebookCommentWithRetry(token: string, postId: string, commentText: string, maxRetries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await fetch(
+        `https://graph.facebook.com/v20.0/${postId}/comments`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: token, message: commentText }),
+        }
+      );
+      if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Facebook comment API ${resp.status}: ${err.slice(0, 300)}`);
+      }
+      const json: any = await resp.json();
+      console.log(`  💬 Auto-comment posted successfully: ${json.id}`);
+      return;
+    } catch (e: any) {
+      console.warn(`  ⚠ Comment attempt ${attempt}/${maxRetries} failed: ${e.message?.slice(0, 200)}`);
+      if (attempt < maxRetries) {
+        const waitMs = 5000 * attempt;
+        console.log(`  ⏳ Retrying comment in ${waitMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, waitMs));
+      } else {
+        throw e;
+      }
+    }
   }
-  const json: any = await resp.json();
-  console.log(`  💬 Auto-comment posted: ${json.id}`);
 }
 
 // ─── Facebook Page Publishing ──────────────────────────────────────────────────
@@ -1152,7 +1179,7 @@ async function publishToFacebook(
 
   try {
     const resp = await fetch(
-      `https://graph-video.facebook.com/v20.0/${pageId}/videos`,
+      `https://graph.facebook.com/v20.0/${pageId}/videos`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1184,10 +1211,14 @@ async function publishToFacebook(
     // Auto-generate and post an engaging comment with the website link
     try {
       console.log('  💬 Generating auto-comment...');
+      // Wait for Facebook to finish processing the video before commenting
+      await new Promise(r => setTimeout(r, 8000));
+      // Resolve feed post ID — video upload returns video_id, comments need the feed post_id
+      const commentPostId = await getVideoFeedPostId(token, fbPostId);
       const commentText = await generateFacebookComment(topic || title, title);
-      await postFacebookComment(token, fbPostId, commentText);
+      await postFacebookCommentWithRetry(token, commentPostId, commentText);
     } catch (ce: any) {
-      console.warn(`  ⚠ Auto-comment failed (non-critical): ${ce.message?.slice(0, 80)}`);
+      console.warn(`  ⚠ Auto-comment failed (non-critical): ${ce.message?.slice(0, 200)}`);
     }
 
     return true;

@@ -31,6 +31,27 @@ const args = process.argv.slice(2);
 const queueIdIdx = args.indexOf('--queue-id');
 const targetQueueId: string | null = queueIdIdx !== -1 ? (args[queueIdIdx + 1] ?? null) : null;
 
+// ─── Video Feed Post ID Resolver ───────────────────────────────────────────────
+// Video uploads return a video_id; commenting requires the feed post_id ({PAGE_ID}_{POST_ID})
+
+async function getVideoFeedPostId(token: string, videoId: string): Promise<string> {
+  try {
+    const resp = await fetch(
+      `https://graph.facebook.com/v20.0/${videoId}?fields=id,posts&access_token=${encodeURIComponent(token)}`
+    );
+    if (resp.ok) {
+      const json: any = await resp.json();
+      const postId = json?.posts?.data?.[0]?.id;
+      if (postId) {
+        console.log(`  🔗 Resolved feed post ID for comment: ${postId}`);
+        return postId;
+      }
+    }
+  } catch {}
+  console.log(`  🔗 Using video ID directly for comment: ${videoId}`);
+  return videoId;
+}
+
 // ─── Cerebras Comment Generator ───────────────────────────────────────────────
 
 async function generateAndPostFacebookComment(
@@ -96,21 +117,37 @@ REQUIREMENTS:
     commentText = `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could protect others. Get free help at ${WEBSITE_LINK}`;
   }
 
-  // Post the comment to Facebook
-  const commentResp = await fetch(
-    `https://graph.facebook.com/v20.0/${fbPostId}/comments`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: pageToken, message: commentText }),
+  // Wait for Facebook to finish processing the video before commenting
+  console.log('  ⏳ Waiting 8s for Facebook to process video before commenting...');
+  await new Promise(r => setTimeout(r, 8000));
+
+  // Post the comment with retry logic
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const commentResp = await fetch(
+      `https://graph.facebook.com/v20.0/${fbPostId}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: pageToken, message: commentText }),
+      }
+    );
+    if (commentResp.ok) {
+      const commentJson: any = await commentResp.json();
+      console.log(`  💬 Auto-comment posted successfully: ${commentJson.id}`);
+      return;
     }
-  );
-  if (!commentResp.ok) {
     const err = await commentResp.text();
-    throw new Error(`Facebook comment API ${commentResp.status}: ${err.slice(0, 200)}`);
+    const errMsg = `Facebook comment API ${commentResp.status}: ${err.slice(0, 300)}`;
+    console.warn(`  ⚠ Comment attempt ${attempt}/${maxRetries} failed: ${errMsg}`);
+    if (attempt < maxRetries) {
+      const waitMs = 5000 * attempt;
+      console.log(`  ⏳ Retrying comment in ${waitMs / 1000}s...`);
+      await new Promise(r => setTimeout(r, waitMs));
+    } else {
+      throw new Error(errMsg);
+    }
   }
-  const commentJson: any = await commentResp.json();
-  console.log(`  💬 Auto-comment posted: ${commentJson.id}`);
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -187,7 +224,7 @@ async function processItem(item: any) {
 
   try {
     const resp = await fetch(
-      `https://graph-video.facebook.com/v20.0/${pageId}/videos`,
+      `https://graph.facebook.com/v20.0/${pageId}/videos`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -236,9 +273,11 @@ async function processItem(item: any) {
     // Auto-generate and post an engaging comment with the website link
     try {
       console.log('  💬 Generating auto-comment...');
-      await generateAndPostFacebookComment(supabase, token, fbPostId, item.title || '', item.title || '');
+      // Resolve feed post ID — video upload returns video_id, comments need the feed post_id
+      const commentPostId = await getVideoFeedPostId(token, fbPostId);
+      await generateAndPostFacebookComment(supabase, token, commentPostId, item.title || '', item.topic || item.title || '');
     } catch (ce: any) {
-      console.warn(`  ⚠ Auto-comment failed (non-critical): ${ce.message?.slice(0, 80)}`);
+      console.warn(`  ⚠ Auto-comment failed (non-critical): ${ce.message?.slice(0, 200)}`);
     }
 
     // Create notification

@@ -73,49 +73,54 @@ async function generateAndPostFacebookComment(
   let commentText: string;
 
   if (cerebrasKey) {
-    const prompt = `You are a social media engagement specialist for a crypto scam awareness page.
+      const prompt = `You are an investigative journalist managing a crypto scam awareness Facebook page. Write a professional Facebook comment to pin under a newly published video.
 
-Write a single engaging Facebook comment to post under a newly published video about:
-Title: "${title}"
-Topic: "${topic || title}"
+  Video Title: "${title}"
+  Scam Type: "${topic || title}"
+  Website for victims: ${WEBSITE_LINK}
 
-REQUIREMENTS:
-- Directly relevant to this specific scam type — not generic
-- Encourages viewers to like and share the post
-- Asks one thought-provoking question to spark discussion
-- Naturally includes this link: ${WEBSITE_LINK}
-- Maximum 280 characters total (including the link)
-- Urgent, authentic tone — like an investigator speaking to potential victims
-- NEVER start with "Great video", "Thanks for watching", or similar generic openers
-- Return ONLY the comment text — no quotes, no labels, no explanation`;
+  COMMENT STRUCTURE (follow this exact order):
+  1. One sentence directly naming the specific scam mechanism shown in the video — make it specific, not generic
+  2. One clear warning sentence identifying the key red flag that victims should recognise
+  3. One empathetic call-to-action sentence inviting affected viewers to report their case through the website link — frame it as confidential, professional, and free
 
-    try {
-      const aiResp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cerebrasKey}` },
-        body: JSON.stringify({
-          model: 'gpt-oss-120b',
-          messages: [{ role: 'user', content: prompt }],
-          // FIX: max_tokens raised 400 → 2000 — reasoning models need budget for reasoning + content
+  QUALITY RULES:
+  - Total length: 300–450 characters including the link
+  - Tone: professional, empathetic, and authoritative — like a qualified investigator, not a salesperson
+  - The link must appear naturally in the CTA sentence, not bolted on at the end
+  - Do NOT ask generic engagement questions — be direct and purposeful
+  - Do NOT use emojis, hashtags, ALL-CAPS words, or bullet points
+  - Do NOT start with "Great video", "Thanks", "Important:", or "Warning:"
+  - The comment must comply with Facebook community standards — no misleading claims, no guaranteed recovery promises
+  - Return ONLY the comment text with no quotes, labels, or explanation`;
+
+      try {
+        const aiResp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cerebrasKey}` },
+          body: JSON.stringify({
+            model: 'gpt-oss-120b',
+            messages: [{ role: 'user', content: prompt }],
+            // max_tokens 2000 — reasoning models need budget for chain-of-thought plus the output text
             max_tokens: 2000,
-        }),
-      });
-      if (aiResp.ok) {
-        const aiJson: any = await aiResp.json();
-        const raw = ((aiJson?.choices?.[0]?.message?.content as string) || '').trim().replace(/^["']|["']$/g, '');
-        commentText = raw.includes(WEBSITE_LINK)
-          ? raw.slice(0, 500)
-          : `${raw.slice(0, 220)} ${WEBSITE_LINK}`.trim();
+          }),
+        });
+        if (aiResp.ok) {
+          const aiJson: any = await aiResp.json();
+          const raw = ((aiJson?.choices?.[0]?.message?.content as string) || '').trim().replace(/^["']/g, '').replace(/["']$/g, '');
+          commentText = raw.includes(WEBSITE_LINK)
+            ? raw.slice(0, 600)
+            : `${raw.slice(0, 380)} ${WEBSITE_LINK}`.trim();
       } else {
         throw new Error(`Cerebras ${aiResp.status}`);
       }
     } catch (e: any) {
       console.warn(`  ⚠ Cerebras comment generation failed: ${e.message} — using fallback`);
-      commentText = `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could protect others. Get free help at ${WEBSITE_LINK}`;
+      commentText = `This type of operation follows a well-documented pattern — the warning signs are identifiable but easy to miss without prior knowledge. If you or someone you know has been affected by a scam like this, a confidential case review is available at ${WEBSITE_LINK} — free of charge and handled by investigators.`;
     }
   } else {
     console.warn('  ⚠ No active Cerebras key found — using fallback comment');
-    commentText = `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could protect others. Get free help at ${WEBSITE_LINK}`;
+    commentText = `This type of operation follows a well-documented pattern — the warning signs are identifiable but easy to miss without prior knowledge. If you or someone you know has been affected by a scam like this, a confidential case review is available at ${WEBSITE_LINK} — free of charge and handled by investigators.`;
   }
 
   // Wait for Facebook to finish processing the video before commenting

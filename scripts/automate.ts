@@ -223,7 +223,7 @@ VOICEOVER RULES (the "script" field):
 - CRITICAL: NEVER use first-person narration — BANNED words: "I", "I've", "I was", "I lost", "I joined", "me", "my", "we joined", "our wallet"
 - The narrator is a journalist REPORTING on scams, NOT a victim telling their story
 - Be factual, specific, dramatic — name the scam type, explain how it works, warn the viewer
-- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings."
+- IMPORTANT: End with EXACTLY these three sentences: "If you have been a victim of a crypto scam, visit the link in our bio or check the first comment below for immediate help. Recover your lost crypto through a free confidential case review. Follow for daily crypto scam warnings."
 - FORBIDDEN in the script field: emojis, [brackets], (parenthetical stage directions), "Scene:", "Script:", "Narrator:", "Voiceover:", section labels, timestamps, asterisks, or any non-spoken text
 - Write as ONE continuous paragraph of spoken words — no line breaks, no sections
 
@@ -306,13 +306,13 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
             /\b(crypto|scam|fraud|victim|warning|alert|millions|thousands|stolen|protect|follow|send|invest|wallet|you|your|this|these|how|what|why|when|people|today|now|already|never|always|beware)\b/i.test(l)
           );
           _scriptText = _candidates.sort((a: string, b: string) => b.length - a.length)[0]
-            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
+            || `This crypto scam has already stolen millions. Stay alert and never trust unverified investment promises. If you have been a victim of a crypto scam, visit the link in our bio or check the first comment below for help. Recover your lost crypto through a free confidential case review. Follow for daily crypto scam warnings.`;
         }
         // GUARD: minimum 80 words (~30s audio). If script is shorter, JSON parsing partially failed.
           const _scriptWordCount = _scriptText.split(/\s+/).filter(Boolean).length;
           if (_scriptWordCount < 80) {
             console.warn(`  ⚠ Script only ${_scriptWordCount} words (need 80+ for full-length video) — using extended fallback`);
-            _scriptText = `WARNING: A sophisticated crypto fraud operation is targeting investors globally right now, and it could cost you everything you have worked for. The scheme has already stolen millions from thousands of victims using fake platforms, deepfake celebrity endorsements, and AI-powered chatbots designed to sound exactly like real financial advisors. Scammers build trust carefully over weeks or months before vanishing overnight with your entire investment. The victims are not careless people — they are intelligent, educated individuals who were systematically deceived by increasingly professional fraud operations. Warning signs are always present if you know what to look for: guaranteed returns with no risk, pressure to invest larger amounts, and requests to recruit your friends and family into the scheme. Authorities are warning the public to independently verify every investment platform before sending a single dollar. If you recognize any of these patterns, stop immediately and seek help. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`;
+            _scriptText = `WARNING: A sophisticated crypto fraud operation is targeting investors globally right now, and it could cost you everything you have worked for. The scheme has already stolen millions from thousands of victims using fake platforms, deepfake celebrity endorsements, and AI-powered chatbots designed to sound exactly like real financial advisors. Scammers build trust carefully over weeks or months before vanishing overnight with your entire investment. The victims are not careless people — they are intelligent, educated individuals who were systematically deceived by increasingly professional fraud operations. Warning signs are always present if you know what to look for: guaranteed returns with no risk, pressure to invest larger amounts, and requests to recruit your friends and family into the scheme. Authorities are warning the public to independently verify every investment platform before sending a single dollar. If you recognize any of these patterns, stop immediately and seek help. If you have been a victim of a crypto scam, visit the link in our bio or check the first comment below for a free confidential case review. Follow for daily crypto scam warnings.`;
           }
           return { title: (parsed.title || topic).slice(0, 150), script: _scriptText, scenes };
       }
@@ -321,7 +321,7 @@ Return ONLY valid JSON with no markdown fences, no explanation, nothing else:
     // Emergency fallback — still topic-specific with diverse compositions
     return {
       title: topic.slice(0, 150),
-      script: `WARNING: A sophisticated crypto fraud operation is targeting investors across the globe right now, and it could cost you everything. This scheme has already stolen millions from thousands of unsuspecting victims using fake platforms, deepfake celebrity endorsements, and AI-powered chatbots designed to sound like legitimate financial advisors. Scammers build trust carefully over weeks or months before vanishing overnight with your funds. The victims are not naive — they are intelligent people who were deceived by increasingly professional fraud. Warning signs are always present: guaranteed returns, pressure to invest more, requests to recruit friends and family. Authorities are warning everyone to independently verify any investment platform before sending a single dollar. If you recognize any of these patterns in an investment you are currently involved in, stop immediately and seek help. If you have been a victim of a crypto scam, visit the link in our bio right now. Recover your lost crypto from scammers. Follow for daily crypto scam warnings.`,
+      script: `WARNING: A sophisticated crypto fraud operation is targeting investors across the globe right now, and it could cost you everything. This scheme has already stolen millions from thousands of unsuspecting victims using fake platforms, deepfake celebrity endorsements, and AI-powered chatbots designed to sound like legitimate financial advisors. Scammers build trust carefully over weeks or months before vanishing overnight with your funds. The victims are not naive — they are intelligent people who were deceived by increasingly professional fraud. Warning signs are always present: guaranteed returns, pressure to invest more, requests to recruit friends and family. Authorities are warning everyone to independently verify any investment platform before sending a single dollar. If you recognize any of these patterns in an investment you are currently involved in, stop immediately and seek help. If you have been a victim of a crypto scam, visit the link in our bio or check the first comment below for a free confidential case review. Follow for daily crypto scam warnings.`,
       scenes: [
         `Ultra-wide cold blue-teal shot — a dark sprawling digital network map representing the ${topic} operation, thousands of phantom connection lines spreading across an infinite dark grid, ominous scale`,
         `Extreme macro close-up — a finger hovering over a glowing touchscreen showing a fraudulent ${topic} interface, warm amber backlight, shallow depth of field, sweat on fingertip, intense and immediate`,
@@ -985,37 +985,42 @@ async function uploadFile(localPath: string, bucketPath: string, mime: string): 
 // ─── Facebook Comment Generation ──────────────────────────────────────────────
 
 async function generateFacebookComment(topic: string, title: string): Promise<string> {
-  const WEBSITE_LINK = 'https://onchain-detectives.free.nf';
-  const prompt = `You are a social media engagement specialist for a crypto scam awareness page.
+    const WEBSITE_LINK = 'https://onchain-detectives.free.nf';
+    const prompt = `You are an investigative journalist managing a crypto scam awareness Facebook page. Write a professional Facebook comment to pin under a newly published video.
 
-Write a single engaging Facebook comment to post under a newly published video about:
-Title: "${title}"
-Topic: "${topic}"
+  Video Title: "${title}"
+  Scam Type: "${topic}"
+  Website for victims: ${WEBSITE_LINK}
 
-REQUIREMENTS:
-- Directly relevant to this specific scam type — not generic
-- Encourages viewers to like and share the post
-- Asks one thought-provoking question to spark discussion
-- Naturally includes this link: ${WEBSITE_LINK}
-- Maximum 280 characters total (including the link)
-- Urgent, authentic tone — like an investigator speaking to potential victims
-- NEVER start with "Great video", "Thanks for watching", or similar generic openers
-- Return ONLY the comment text — no quotes, no labels, no explanation`;
+  COMMENT STRUCTURE (follow this exact order):
+  1. One sentence directly naming the specific scam mechanism shown in the video — make it specific, not generic
+  2. One clear warning sentence identifying the key red flag that victims should recognise
+  3. One empathetic call-to-action sentence inviting affected viewers to report their case through the website link — frame it as confidential, professional, and free
 
-  try {
-    return await tryWithKeys('cerebras', async (key) => {
-      // FIX: max_tokens raised 400 → 2000 for comment generation
+  QUALITY RULES:
+  - Total length: 300–450 characters including the link
+  - Tone: professional, empathetic, and authoritative — like a qualified investigator, not a salesperson
+  - The link must appear naturally in the CTA sentence, not bolted on at the end
+  - Do NOT ask generic engagement questions — be direct and purposeful
+  - Do NOT use emojis, hashtags, ALL-CAPS words, or bullet points
+  - Do NOT start with "Great video", "Thanks", "Important:", or "Warning:"
+  - The comment must comply with Facebook community standards — no misleading claims, no guaranteed recovery promises
+  - Return ONLY the comment text with no quotes, labels, or explanation`;
+
+    try {
+      return await tryWithKeys('cerebras', async (key) => {
+        // max_tokens 2000 — reasoning models need budget for chain-of-thought plus the output text
         const text = await cerebrasChat(key, [{ role: 'user', content: prompt }], 2000);
-      const clean = text.replace(/^["']|["']$/g, '').trim();
-      return clean.includes(WEBSITE_LINK)
-        ? clean.slice(0, 500)
-        : `${clean.slice(0, 220)} ${WEBSITE_LINK}`.trim();
-    });
-  } catch {
-    return `Have you or someone you know been targeted by this type of scam? Share your experience below — your story could save others. Get help at ${WEBSITE_LINK}`;
+        const clean = text.replace(/^["']|["']$/g, '').trim();
+        return clean.includes(WEBSITE_LINK)
+          ? clean.slice(0, 600)
+          : `${clean.slice(0, 380)} ${WEBSITE_LINK}`.trim();
+      });
+    } catch {
+      return `This type of operation follows a well-documented pattern — the warning signs are identifiable but easy to miss without prior knowledge. If you or someone you know has been affected by a scam like this, a confidential case review is available at ${WEBSITE_LINK} — free of charge and handled by investigators.`;
+    }
   }
-}
-
+  
 // Resolve the feed post ID from a video ID (video upload returns video_id, not post_id)
 async function getVideoFeedPostId(token: string, videoId: string): Promise<string> {
   try {

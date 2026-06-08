@@ -183,7 +183,7 @@ const OutroCard: React.FC<{ frame: number; fps: number; outroStart: number }> = 
             margin: 0,
             textAlign: 'center',
           }}>
-            CONSULTATION IS FREE
+            LINK IN BIO & COMMENTS BELOW
           </p>
         </div>
       </AbsoluteFill>

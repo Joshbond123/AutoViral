@@ -100,7 +100,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 
   export default function App() {
     return (
-      <BrowserRouter>
+      <BrowserRouter basename="/AutoViral">
         <AppContent />
       </BrowserRouter>
     );

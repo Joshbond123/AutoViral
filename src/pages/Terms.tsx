@@ -5,6 +5,7 @@ const sections = [
   { id: 'service', title: 'The service' },
   { id: 'eligibility', title: 'Eligibility & accounts' },
   { id: 'tiktok-compliance', title: 'TikTok platform compliance' },
+    { id: 'facebook-compliance', title: 'Facebook platform compliance' },
   { id: 'user-content', title: 'Your content & licenses' },
   { id: 'ai-content', title: 'AI-generated content' },
   { id: 'acceptable-use', title: 'Acceptable use' },
@@ -26,7 +27,7 @@ export default function Terms() {
       eyebrow="Legal · Terms"
       title={<>Terms of <span className="text-brand-primary">Service</span></>}
       subtitle="These Terms govern your use of AutoViral. They are written to be readable, but they're still a binding contract — please take a few minutes to skim them."
-      lastUpdated="April 29, 2026"
+      lastUpdated="June 9, 2026"
       sections={sections}
     >
       <LegalSection id="acceptance" number="01" title="Acceptance of these terms">

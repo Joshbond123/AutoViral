@@ -5,6 +5,7 @@ const sections = [
   { id: 'information-we-collect', title: 'Information we collect' },
   { id: 'how-we-use', title: 'How we use information' },
   { id: 'tiktok-data', title: 'TikTok account data' },
+    { id: 'facebook-data', title: 'Facebook Page data' },
   { id: 'ai-providers', title: 'AI & third-party processors' },
   { id: 'cookies', title: 'Cookies & local storage' },
   { id: 'sharing', title: 'How we share data' },
@@ -23,7 +24,7 @@ export default function Privacy() {
       eyebrow="Legal · Privacy"
       title={<>Privacy <span className="text-brand-primary">Policy</span></>}
       subtitle="We built AutoViral to do the heavy lifting for creators — and we built our data practices to be just as transparent as the workflow itself. This policy explains exactly what we collect, why we collect it, and how you stay in control."
-      lastUpdated="April 29, 2026"
+      lastUpdated="June 9, 2026"
       sections={sections}
     >
       <LegalSection id="overview" number="01" title="Overview">

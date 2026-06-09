@@ -5,8 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 
   export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
-    // In CI the secrets arrive via process.env, not .env files.
-    // Merge them so define() always gets the real values.
+    // CI secrets arrive via process.env, not .env files.
     const get = (...keys: string[]) => {
       for (const k of keys) {
         const val = env[k] || process.env[k];
@@ -15,7 +14,7 @@ import tailwindcss from '@tailwindcss/vite';
       return '';
     };
     return {
-      base: '/',
+      base: '/AutoViral/',
       plugins: [react(), tailwindcss()],
       define: {
         'process.env.GEMINI_API_KEY': JSON.stringify(get('GEMINI_API_KEY')),

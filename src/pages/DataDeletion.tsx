@@ -26,7 +26,7 @@ import LegalLayout, { LegalSection, LegalCallout, LegalList } from '../component
           </p>
           <LegalCallout>
             <strong className="text-white">Quick summary:</strong> To delete all your data, either use the in-app delete option, email us
-            at <a href="mailto:privacy@autoviral.run.place" className="text-brand-primary underline">privacy@autoviral.run.place</a>, or
+            at <a href="mailto:privacy@joshbond123.github.io/AutoViral" className="text-brand-primary underline">privacy@joshbond123.github.io/AutoViral</a>, or
             follow the step-by-step instructions on this page. We process all deletion requests within 30 days.
           </LegalCallout>
         </LegalSection>
@@ -38,7 +38,7 @@ import LegalLayout, { LegalSection, LegalCallout, LegalList } from '../component
           </p>
           <h3 className="text-xl font-bold text-white mt-8 mb-3">Option A — Remove from within AutoViral</h3>
           <LegalList items={[
-            'Sign in to your AutoViral account at autoviral.run.place',
+            'Sign in to your AutoViral account at joshbond123.github.io/AutoViral',
             'Navigate to Settings → Facebook Page',
             'Click "Remove" next to your connected Facebook Page',
             'Confirm the removal — your Page Access Token and all associated data are immediately deleted from our database',
@@ -51,11 +51,11 @@ import LegalLayout, { LegalSection, LegalCallout, LegalList } from '../component
             'Go to Facebook Settings → Security and Login → Apps and Websites',
             'Find "AutoViral" in the list of connected apps',
             'Click "Remove" to revoke access',
-            'Once revoked, please also email us at privacy@autoviral.run.place so we can delete your stored Page Access Token from our database',
+            'Once revoked, please also email us at privacy@joshbond123.github.io/AutoViral so we can delete your stored Page Access Token from our database',
           ]} />
           <h3 className="text-xl font-bold text-white mt-8 mb-3">Option C — Submit a deletion request</h3>
           <p>
-            Send an email to <a href="mailto:privacy@autoviral.run.place" className="text-brand-primary underline">privacy@autoviral.run.place</a> with
+            Send an email to <a href="mailto:privacy@joshbond123.github.io/AutoViral" className="text-brand-primary underline">privacy@joshbond123.github.io/AutoViral</a> with
             the subject line <strong className="text-white">"Data Deletion Request"</strong> and include:
           </p>
           <LegalList items={[
@@ -75,7 +75,7 @@ import LegalLayout, { LegalSection, LegalCallout, LegalList } from '../component
           </p>
           <h3 className="text-xl font-bold text-white mt-8 mb-3">Step 1 — Sign in to AutoViral</h3>
           <p>
-            Visit <a href="https://autoviral.run.place" className="text-brand-primary underline">autoviral.run.place</a> and sign in with
+            Visit <a href="https://joshbond123.github.io/AutoViral" className="text-brand-primary underline">joshbond123.github.io/AutoViral</a> and sign in with
             your email and password.
           </p>
           <h3 className="text-xl font-bold text-white mt-8 mb-3">Step 2 — Go to Settings</h3>
@@ -91,7 +91,7 @@ import LegalLayout, { LegalSection, LegalCallout, LegalList } from '../component
           <h3 className="text-xl font-bold text-white mt-8 mb-3">Alternative — Email request</h3>
           <p>
             If you cannot access your account, email us at{' '}
-            <a href="mailto:privacy@autoviral.run.place" className="text-brand-primary underline">privacy@autoviral.run.place</a>{' '}
+            <a href="mailto:privacy@joshbond123.github.io/AutoViral" className="text-brand-primary underline">privacy@joshbond123.github.io/AutoViral</a>{' '}
             with the subject line <strong className="text-white">"Account Deletion Request"</strong> and your registered email address.
             We will verify your identity and process the deletion within 30 days.
           </p>
@@ -147,7 +147,7 @@ import LegalLayout, { LegalSection, LegalCallout, LegalList } from '../component
             For any questions about data deletion, or to submit a deletion request, please contact our privacy team:
           </p>
           <LegalList items={[
-            'Email: privacy@autoviral.run.place',
+            'Email: privacy@joshbond123.github.io/AutoViral',
             'Subject line for account deletion: "Account Deletion Request"',
             'Subject line for Facebook data only: "Data Deletion Request"',
             'Response time: within 48 business hours',

@@ -8,12 +8,14 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
   import Home from './pages/Home';
   import Privacy from './pages/Privacy';
   import Terms from './pages/Terms';
+  import DataDeletion from './pages/DataDeletion';
+  import AppVerification from './pages/AppVerification';
   import ManualGenerate from './pages/ManualGenerate';
   import { AnimatePresence, motion } from 'motion/react';
   import { Menu } from 'lucide-react';
   import { supabaseAuth } from './lib/supabase';
 
-  const PUBLIC_PATHS = new Set(['/', '/privacy', '/terms']);
+  const PUBLIC_PATHS = new Set(['/', '/privacy', '/terms', '/data-deletion']);
 
   function AppContent() {
     const [session, setSession] = useState<Session | null>(null);
@@ -71,45 +73,34 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
               )}
             </AnimatePresence>
             <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="fixed top-4 left-4 z-30 md:hidden p-2.5 rounded-xl bg-surface border border-white/10 text-white/60 hover:text-white shadow-lg"
+            >
+              <Menu size={20} />
+            </button>
           </>
         )}
-        <main className={`flex-1 min-w-0 transition-all duration-500 ${!isPublicPage ? 'md:pl-64' : ''}`}>
-          {!isPublicPage && (
-            <div className="flex items-center gap-4 px-4 py-4 border-b border-white/5 bg-surface md:hidden">
-              <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-all text-white/70">
-                <Menu size={20} />
-              </button>
-              <span className="font-bold text-lg tracking-tight">AutoViral</span>
-            </div>
-          )}
-          <div className={!isPublicPage ? 'p-5 md:p-12 max-w-7xl mx-auto' : ''}>
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={location.pathname}
-                initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-              >
-                <Routes location={location}>
-                  <Route path="/" element={<Home />} />
-                  <Route path="/privacy" element={<Privacy />} />
-                  <Route path="/terms" element={<Terms />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/schedule" element={<Schedule />} />
-                  <Route path="/manual" element={<ManualGenerate />} />
-                  <Route path="/history" element={<Dashboard />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Routes>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        </main>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/data-deletion" element={<DataDeletion />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/schedule" element={<Schedule />} />
+          <Route path="/manual" element={<ManualGenerate />} />
+          <Route path="/history" element={<Dashboard />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/app-verification" element={<AppVerification />} />
+          <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} replace />} />
+        </Routes>
       </div>
     );
   }
 
   export default function App() {
     return (
-      <BrowserRouter basename="/AutoViral">
+      <BrowserRouter>
         <AppContent />
       </BrowserRouter>
     );

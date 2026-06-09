@@ -1,4 +1,4 @@
-import { LayoutDashboard, Calendar, History, Settings, LogOut, X, Video } from 'lucide-react';
+import { LayoutDashboard, Calendar, History, Settings, LogOut, X, Video, ShieldCheck } from 'lucide-react';
   import { NavLink } from 'react-router-dom';
   import { motion, AnimatePresence } from 'motion/react';
   import { supabaseAuth } from '../lib/supabase';
@@ -13,7 +13,7 @@ import { LayoutDashboard, Calendar, History, Settings, LogOut, X, Video } from '
       if (supabaseAuth) await supabaseAuth.auth.signOut();
       localStorage.removeItem('tiktok_user_id');
       sessionStorage.clear();
-      window.location.replace(import.meta.env.BASE_URL || '/AutoViral/');
+      window.location.replace('/');
     };
 
     const navItems = [
@@ -22,13 +22,14 @@ import { LayoutDashboard, Calendar, History, Settings, LogOut, X, Video } from '
       { name: 'Manual Generate', icon: Video, path: '/manual' },
       { name: 'History', icon: History, path: '/history' },
       { name: 'Settings', icon: Settings, path: '/settings' },
+      { name: 'App Verification', icon: ShieldCheck, path: '/app-verification' },
     ];
 
     const content = (
       <div className="w-64 h-full bg-surface border-r border-white/5 flex flex-col p-6">
         <div className="flex items-center justify-between mb-12 px-2">
           <div className="flex items-center gap-3">
-            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20" />
+            <img src="/logo.png" alt="AutoViral" className="w-10 h-10 rounded-xl shadow-lg shadow-brand-primary/20" />
             <div>
               <h1 className="font-bold text-lg tracking-tight">AutoViral</h1>
               <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-mono">AI Automation</p>
@@ -62,10 +63,13 @@ import { LayoutDashboard, Calendar, History, Settings, LogOut, X, Video } from '
         <div className="hidden md:flex fixed left-0 top-0 h-screen z-30">{content}</div>
         <AnimatePresence>
           {isOpen && (
-            <motion.div initial={{ x: -280 }} animate={{ x: 0 }} exit={{ x: -280 }}
-              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+            <motion.div
+              initial={{ x: -280 }} animate={{ x: 0 }} exit={{ x: -280 }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
               className="fixed left-0 top-0 h-screen z-50 md:hidden"
-            >{content}</motion.div>
+            >
+              {content}
+            </motion.div>
           )}
         </AnimatePresence>
       </>

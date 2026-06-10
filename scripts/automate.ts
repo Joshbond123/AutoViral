@@ -1103,6 +1103,8 @@ async function publishToFacebook(
   const description = [caption, hashtags].filter(Boolean).join('\n');
 
   try {
+    // FIX: published:true and privacy.value='EVERYONE' are required for publicly-visible posts;
+    // without them Facebook defaults to unpublished/restricted (visible only to page admin).
     const resp = await fetch(
       `https://graph.facebook.com/v20.0/${pageId}/videos`,
       {
@@ -1113,6 +1115,8 @@ async function publishToFacebook(
           file_url: videoUrl,
           description: description || undefined,
           title: title || undefined,
+          published: true,
+          privacy: { value: 'EVERYONE' },
         }),
       }
     );

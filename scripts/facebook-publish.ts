@@ -239,6 +239,8 @@ async function processItem(item: any) {
           file_url: item.video_url,
           description: description || undefined,
           title: item.title || undefined,
+          published: true,
+          privacy: { value: 'EVERYONE' },
         }),
       }
     );

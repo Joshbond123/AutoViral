@@ -72,8 +72,11 @@ Deno.serve(async (req) => {
     const queueId = Array.isArray(queueRow) ? queueRow[0]?.id : queueRow?.id;
 
     // Publish video to Facebook Page
+    // FIX: graph-video.facebook.com is deprecated — use graph.facebook.com for all requests.
+    // FIX: published:true and privacy.value='EVERYONE' are required for publicly-visible posts;
+    //      without them Facebook defaults to unpublished/restricted (visible only to page admin).
     const fbResp = await fetch(
-      `https://graph-video.facebook.com/${FB_GRAPH_VERSION}/${pageId}/videos`,
+      `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/videos`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,6 +85,8 @@ Deno.serve(async (req) => {
           file_url: videoUrl,
           description: description || undefined,
           title: title || undefined,
+          published: true,
+          privacy: { value: 'EVERYONE' },
         }),
       },
     );
